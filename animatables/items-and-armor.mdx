@@ -1,0 +1,151 @@
+---
+title: "Animating Items and Armor with GeoItem"
+description: "Implement GeoItem on your Minecraft item or armor class to enable GeckoLib animations, singleton caches, per-stack IDs, and perspective-aware rendering."
+---
+
+`GeoItem` extends `SingletonGeoAnimatable` and is the correct interface for any Minecraft `Item`, including armor. Unlike entities, item classes are singletons in Minecraft — a single Java object serves every `ItemStack` of that type. GeckoLib accounts for this by assigning each stack a unique numeric ID and storing animation state per-ID inside a shared `SingletonAnimatableInstanceCache`.
+
+## Singleton model and stack IDs
+
+Because one item class instance is shared across all stacks, GeckoLib must differentiate stacks by ID rather than by Java object identity.
+
+| Method | Purpose |
+|---|---|
+| `GeoItem.getId(ItemStack stack)` | Reads the stack's existing ID, or falls back to `stack.hashCode()` if none has been assigned |
+| `GeoItem.getOrAssignId(ItemStack stack, ServerLevel level)` | Reads the ID, and if absent, reserves a new globally unique ID and writes it to the stack's data components |
+
+Use `getOrAssignId` when you need a stable ID that persists across saves (for example, before triggering an animation from the server). Use `getId` on the client when an ID has already been assigned.
+
+## Implementation
+
+<Steps>
+  <Step title="Implement GeoItem on your item class">
+    Add `implements GeoItem`, create the cache field, and call `GeoItem.registerSyncedAnimatable(this)` in the constructor.
+
+    ```java MyItem.java
+    import com.geckolib.animatable.GeoItem;
+    import com.geckolib.animatable.SingletonGeoAnimatable;
+    import com.geckolib.animatable.client.GeoRenderProvider;
+    import com.geckolib.animatable.instance.AnimatableInstanceCache;
+    import com.geckolib.animatable.manager.AnimatableManager;
+    import com.geckolib.animation.AnimationController;
+    import com.geckolib.animation.RawAnimation;
+    import com.geckolib.util.GeckoLibUtil;
+    import net.minecraft.world.item.Item;
+
+    import java.util.function.Consumer;
+
+    public class MyItem extends Item implements GeoItem {
+
+        private static final RawAnimation SWING_ANIM =
+            RawAnimation.begin().thenPlay("animation.myitem.swing");
+        private static final RawAnimation IDLE_ANIM =
+            RawAnimation.begin().thenLoop("animation.myitem.idle");
+
+        private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+
+        public MyItem(Properties properties) {
+            super(properties);
+            // Must be called in the constructor to register with GeckoLib networking
+            GeoItem.registerSyncedAnimatable(this);
+        }
+
+        @Override
+        public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+            controllers.add(
+                new AnimationController<>(this, "controller", 5, state ->
+                    state.setAndContinue(IDLE_ANIM)
+                )
+                .triggerableAnim("swing", SWING_ANIM)
+            );
+        }
+
+        @Override
+        public AnimatableInstanceCache getAnimatableInstanceCache() {
+            return this.cache;
+        }
+
+        @Override
+        public void createGeoRenderer(Consumer<GeoRenderProvider> consumer) {
+            consumer.accept(new GeoRenderProvider() {
+                private MyItemRenderer renderer;
+
+                @Override
+                public GeoItemRenderer<?> getGeoItemRenderer() {
+                    if (this.renderer == null)
+                        this.renderer = new MyItemRenderer();
+                    return this.renderer;
+                }
+            });
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Trigger animations from your item logic">
+    Animations are triggered via `triggerAnim` inherited from `SingletonGeoAnimatable`. Items require a `relatedEntity` (typically the holding player) and the stack's `instanceId`.
+
+    ```java MyItem.java
+    @Override
+    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
+        ItemStack stack = player.getItemInHand(hand);
+
+        if (!level.isClientSide()) {
+            // Assign or retrieve a stable ID for this stack, then trigger the animation
+            long id = GeoItem.getOrAssignId(stack, (ServerLevel) level);
+            this.triggerAnim(player, id, "controller", "swing");
+        }
+
+        return InteractionResultHolder.success(stack);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Triggering and stopping animations
+
+`GeoItem` inherits `triggerAnim` and `stopTriggeredAnim` from `SingletonGeoAnimatable`.
+
+### `triggerAnim`
+
+```java
+default void triggerAnim(Entity relatedEntity, long instanceId, @Nullable String controllerName, String animName)
+```
+
+Triggers the named animation on the controller identified by `controllerName`. Pass `null` for `controllerName` to search all controllers (less efficient). `relatedEntity` is used to determine the side and to route the network packet; pass the holding `Player`.
+
+### `stopTriggeredAnim`
+
+```java
+default void stopTriggeredAnim(Entity relatedEntity, long instanceId, @Nullable String controllerName, @Nullable String animName)
+```
+
+Stops a previously triggered animation. Pass `null` for `animName` to stop any active triggered animation on the controller.
+
+## Armor
+
+Armor items follow the same pattern as regular items — implement `GeoItem`, call `GeoItem.registerSyncedAnimatable(this)` in the constructor, and provide a `GeoRenderProvider` that returns a `GeoArmorRenderer` from `getGeoArmorRenderer`.
+
+For armor, use `triggerArmorAnim` and `stopTriggeredArmorAnim` (also inherited from `SingletonGeoAnimatable`) to target the armor rendering context specifically:
+
+```java
+default void triggerArmorAnim(Entity relatedEntity, long instanceId, @Nullable String controllerName, String animName)
+default void stopTriggeredArmorAnim(Entity relatedEntity, long instanceId, @Nullable String controllerName, @Nullable String animName)
+```
+
+## Perspective-aware animations
+
+Override `isPerspectiveAware()` to return `true` if you want different animation behavior depending on how the item is being rendered (first-person, third-person, in a GUI, etc.).
+
+```java MyItem.java
+@Override
+public boolean isPerspectiveAware() {
+    return true;
+}
+```
+
+When `isPerspectiveAware()` is `true`, `animatableCacheOverride()` automatically returns a `ContextBasedAnimatableInstanceCache`. This cache creates a separate `AnimatableManager` for each `ItemDisplayContext`, so controllers registered in `registerControllers` can read the current `ItemDisplayContext` from `DataTickets.ITEM_RENDER_PERSPECTIVE` and branch their animation logic accordingly.
+
+<Note>
+You do not need to instantiate `ContextBasedAnimatableInstanceCache` directly. Returning `true` from `isPerspectiveAware()` and calling `GeckoLibUtil.createInstanceCache(this)` is sufficient.
+</Note>

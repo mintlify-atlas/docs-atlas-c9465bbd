@@ -1,0 +1,150 @@
+---
+title: "Installing GeckoLib in Your Minecraft Mod Project"
+description: "Add the GeckoLib dependency to a Forge, Fabric, or NeoForge mod project via Gradle, including the Maven repository and initialization call."
+keywords: ["geckolib installation", "gradle dependency", "forge fabric neoforge", "maven repository", "mod setup"]
+---
+
+GeckoLib is published to the Cloudsmith Maven repository. Adding it to your project requires two changes: registering the repository and declaring the dependency. The group ID is always `com.geckolib`; the artifact name encodes both the platform and the Minecraft version.
+
+<Info>
+  GeckoLib 5 targets Minecraft **26.1.2** (the internal version name). The current GeckoLib release is **5.5.1**. Check [GitHub](https://github.com/bernie-g/geckolib) or the [Cloudsmith repository](https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/) for the latest version before adding the dependency.
+</Info>
+
+## Add the Maven repository
+
+Add the following repository to your build script so Gradle can resolve the `com.geckolib` artifacts:
+
+<CodeGroup>
+
+```groovy build.gradle (Groovy)
+repositories {
+    maven {
+        name = "GeckoLib"
+        url = "https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/"
+    }
+}
+```
+
+```kotlin build.gradle.kts (Kotlin)
+repositories {
+    maven {
+        name = "GeckoLib"
+        url = uri("https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/")
+    }
+}
+```
+
+</CodeGroup>
+
+## Add the dependency
+
+<Tabs>
+  <Tab title="Forge">
+    Replace `<version>` with the GeckoLib version you want (for example, `5.5.1`).
+
+    <CodeGroup>
+
+    ```groovy build.gradle (Groovy)
+    dependencies {
+        implementation fg.deobf("com.geckolib:geckolib-forge-26.1.2:<version>")
+    }
+    ```
+
+    ```kotlin build.gradle.kts (Kotlin)
+    dependencies {
+        implementation(fg.deobf("com.geckolib:geckolib-forge-26.1.2:<version>"))
+    }
+    ```
+
+    </CodeGroup>
+
+    <Note>
+      ForgeGradle's `fg.deobf()` wrapper is required for any Forge dependency that ships mapped (non-obfuscated) class names.
+    </Note>
+  </Tab>
+  <Tab title="Fabric">
+    Replace `<version>` with the GeckoLib version you want (for example, `5.5.1`).
+
+    <CodeGroup>
+
+    ```groovy build.gradle (Groovy)
+    dependencies {
+        modImplementation include("com.geckolib:geckolib-fabric-26.1.2:<version>")
+    }
+    ```
+
+    ```kotlin build.gradle.kts (Kotlin)
+    dependencies {
+        modImplementation(include("com.geckolib:geckolib-fabric-26.1.2:<version>"))
+    }
+    ```
+
+    </CodeGroup>
+
+    <Warning>
+      On Fabric, you **must** bundle GeckoLib inside your mod JAR using Loom's `include()` configuration (jar-in-jar). If you use `modImplementation` alone without `include()`, GeckoLib will be missing at runtime for users who do not have it installed separately.
+    </Warning>
+  </Tab>
+  <Tab title="NeoForge">
+    Replace `<version>` with the GeckoLib version you want (for example, `5.5.1`).
+
+    <CodeGroup>
+
+    ```groovy build.gradle (Groovy)
+    dependencies {
+        implementation "com.geckolib:geckolib-neoforge-26.1.2:<version>"
+    }
+    ```
+
+    ```kotlin build.gradle.kts (Kotlin)
+    dependencies {
+        implementation("com.geckolib:geckolib-neoforge-26.1.2:<version>")
+    }
+    ```
+
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## Initialize GeckoLib
+
+GeckoLib registers its data components and other internals lazily; you need to trigger that initialization during your mod's startup. Call `GeckoLibConstants.init()` from your mod's main constructor or initialization method.
+
+<Tabs>
+  <Tab title="Forge / NeoForge">
+    Call `init()` inside your `@Mod` constructor:
+
+    ```java MyMod.java
+    import com.geckolib.GeckoLibConstants;
+    import net.minecraftforge.fml.common.Mod;
+
+    @Mod("mymod")
+    public class MyMod {
+        public MyMod() {
+            GeckoLibConstants.init();
+            // ... rest of your mod setup
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Fabric">
+    Call `init()` from your `ModInitializer` (and optionally your `ClientModInitializer` if you have one):
+
+    ```java MyMod.java
+    import com.geckolib.GeckoLibConstants;
+    import net.fabricmc.api.ModInitializer;
+
+    public class MyMod implements ModInitializer {
+        @Override
+        public void onInitialize() {
+            GeckoLibConstants.init();
+            // ... rest of your mod setup
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  `GeckoLibConstants.init()` is intentionally a no-op method body — its purpose is to ensure the class is loaded so that its static initializers (such as registering the `STACK_ANIMATABLE_ID_COMPONENT` data component) run at the right time during startup.
+</Tip>

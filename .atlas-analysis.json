@@ -1,0 +1,96 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "GeckoLib",
+  "projectDescription": "GeckoLib is an animation and rendering engine for Minecraft mods, providing keyframe-based 3D animations, concurrent controller support, sound/particle/event keyframes, and MoLang math expressions for Forge, Fabric, and NeoForge.",
+  "theme": "palm",
+  "primaryColor": "#f36434",
+  "lightColor": "#75ae49",
+  "darkColor": "#5e4c2d",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Animatables",
+            "pages": [
+              "animatables/overview",
+              "animatables/entities",
+              "animatables/block-entities",
+              "animatables/items-and-armor",
+              "animatables/replaced-entities"
+            ]
+          },
+          {
+            "group": "Animation System",
+            "pages": [
+              "animation/controllers",
+              "animation/raw-animation",
+              "animation/easing-types",
+              "animation/keyframe-events"
+            ]
+          },
+          {
+            "group": "Models & Rendering",
+            "pages": [
+              "rendering/geo-model",
+              "rendering/renderers",
+              "rendering/render-layers"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/molang-math",
+              "advanced/stateless-animatables",
+              "advanced/custom-extensions",
+              "advanced/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Complex 3D keyframe-based animations via Blockbench",
+    "30+ built-in easing types (sine, cubic, elastic, bounce, catmull-rom, and more)",
+    "Concurrent animation support via multiple AnimationControllers",
+    "Sound, particle, and custom instruction keyframe events",
+    "MoLang math expression support for procedural animations",
+    "Triggered animations synced from server to client",
+    "Support for Forge, Fabric, and NeoForge modloaders",
+    "Built-in render layers (glow, texture, item-in-hand, armor)",
+    "Perspective-aware item animations",
+    "Stateless animatables for data-driven animation"
+  ],
+  "publicApiSurface": [
+    "GeoAnimatable — root interface for all animatable objects",
+    "GeoEntity — animatable interface for Minecraft entities",
+    "GeoBlockEntity — animatable interface for block entities",
+    "GeoItem — animatable interface for items and armor",
+    "GeoReplacedEntity — animatable interface for replaced entity renderers",
+    "SingletonGeoAnimatable — base for singleton/flyweight animatables",
+    "AnimationController — manages and drives animation state per animatable",
+    "RawAnimation — builder for defining animation sequences and chains",
+    "GeoModel — abstract base for all GeckoLib model definitions",
+    "DefaultedEntityGeoModel / DefaultedItemGeoModel / DefaultedBlockGeoModel — convention-based model helpers",
+    "GeoEntityRenderer / GeoItemRenderer / GeoBlockRenderer / GeoArmorRenderer / GeoObjectRenderer — built-in renderers",
+    "GeoRenderLayer / GeoRenderLayersContainer — render layer API",
+    "AutoGlowingGeoLayer, ItemInHandGeoLayer, ItemArmorGeoLayer, TextureLayerGeoLayer — built-in render layers",
+    "EasingType — functional interface and registry for easing functions",
+    "LoopType — animation loop behavior (loop, play-once, hold-on-last-frame)",
+    "AnimatableInstanceCache / GeckoLibUtil#createInstanceCache — instance state management",
+    "AnimatableManager / ControllerRegistrar — controller registration and management",
+    "GeoRenderEvent — Forge/Fabric events fired during render passes",
+    "StatelessAnimatable / StatelessAnimationController — data-driven stateless animation API",
+    "GeckoLibUtil — utility helpers for cache creation and custom type registration"
+  ]
+}

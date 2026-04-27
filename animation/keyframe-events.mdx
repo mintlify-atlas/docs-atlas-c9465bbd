@@ -1,0 +1,155 @@
+---
+title: "Keyframe Events: Sound, Particles, and Custom Callbacks"
+description: "Set up sound, particle, and custom instruction handlers on an AnimationController to execute code at precise keyframe moments in a GeckoLib animation."
+---
+
+Keyframe events let you execute code at a specific moment in an animation — for example, playing a footstep sound exactly when a foot hits the ground, spawning a particle effect at the frame a spell is cast, or triggering game logic at an arbitrary point in a cutscene. They are defined in Blockbench's animation timeline as markers attached to individual keyframes, and GeckoLib fires them automatically as the `AnimationController` advances through the animation. Three event types are supported: sound, particle, and custom instruction.
+
+## Setting up keyframe events in Blockbench
+
+In Blockbench, open the **Animate** tab, select a keyframe on the timeline, and switch the channel to **Sound**, **Particle**, or **Custom**. Enter the identifier or instruction string in the field provided. GeckoLib reads these values from the compiled `animation.json` and delivers them to your registered handler at the correct frame.
+
+<Note>
+  GeckoLib logs a warning if an animation contains keyframe markers of a given type but no handler has been registered on the controller for that type. Register all handlers you need before the animation starts playing.
+</Note>
+
+## Handler registration
+
+All three handler types are registered on the `AnimationController` using setter methods that return `this` for chaining. Each setter accepts a `KeyframeEventHandler<T, E>` functional interface:
+
+```java AnimationController.java
+@FunctionalInterface
+public interface KeyframeEventHandler<A extends GeoAnimatable, E extends KeyFrameData> {
+    void handle(KeyFrameEvent<A, E> event);
+}
+```
+
+The `KeyFrameEvent` passed to your handler carries both the animatable instance and the data object for that specific event type.
+
+## Sound keyframe handler
+
+Register a handler with `setSoundKeyframeHandler`. The `SoundKeyframeData` object provides:
+
+| Method | Returns |
+|---|---|
+| `getSound()` | The sound identifier string entered in Blockbench |
+| `getTime()` | The animation time (in seconds) at which this keyframe fires |
+| `getLocatorName()` | The locator bone name, or `null` if not set |
+
+```java MyEntity.java
+new AnimationController<>(this, "actions", 3, state -> state.setAndContinue(ATTACK_ANIM))
+    .setSoundKeyframeHandler(event -> {
+        SoundKeyframeData data = event.keyframeData();
+
+        // Only play sounds on the client side
+        if (event.animatable().level().isClientSide()) {
+            ResourceLocation soundId = ResourceLocation.parse(data.getSound());
+            SoundEvent sound = BuiltInRegistries.SOUND_EVENT.get(soundId);
+
+            if (sound != null) {
+                event.animatable().playSound(sound, 1.0f, 1.0f);
+            }
+        }
+    });
+```
+
+<Warning>
+  Sound playback should only occur on the client side. Wrap sound calls in an `isClientSide()` check or dispatch to a client-only method to avoid running audio code on the server.
+</Warning>
+
+## Particle keyframe handler
+
+Register a handler with `setParticleKeyframeHandler`. The `ParticleKeyframeData` object provides:
+
+| Method | Returns |
+|---|---|
+| `getEffect()` | The particle effect identifier string entered in Blockbench |
+| `getTime()` | The animation time (in seconds) at which this keyframe fires |
+| `getLocatorName()` | The locator bone name to spawn relative to, or `null` if not set |
+
+```java MyEntity.java
+new AnimationController<>(this, "magic", 0, state -> state.setAndContinue(CAST_ANIM))
+    .setParticleKeyframeHandler(event -> {
+        ParticleKeyframeData data = event.keyframeData();
+        MyEntity entity = event.animatable();
+
+        if (entity.level().isClientSide()) {
+            ResourceLocation effectId = ResourceLocation.parse(data.getEffect());
+            ParticleOptions particle = /* resolve your particle from effectId */;
+
+            entity.level().addParticle(
+                particle,
+                entity.getX(), entity.getEyeY(), entity.getZ(),
+                0, 0.1, 0
+            );
+        }
+    });
+```
+
+<Tip>
+  Use `getLocatorName()` together with your `GeoModel` to look up the world position of a specific bone. This lets you spawn particles at an exact point on the model, such as the tip of a staff or the palm of a hand.
+</Tip>
+
+## Custom instruction keyframe handler
+
+Register a handler with `setCustomInstructionKeyframeHandler`. The `CustomInstructionKeyframeData` object provides:
+
+| Method | Returns |
+|---|---|
+| `getInstructions()` | The raw instruction string entered in Blockbench |
+| `getTime()` | The animation time (in seconds) at which this keyframe fires |
+
+Custom instructions give you a free-form string channel — parse it however fits your needs. A common pattern is to use a simple string switch or prefix-based dispatch.
+
+```java MyEntity.java
+new AnimationController<>(this, "events", 0, state -> state.setAndContinue(CINEMATIC_ANIM))
+    .setCustomInstructionKeyframeHandler(event -> {
+        String instruction = event.keyframeData().getInstructions();
+
+        switch (instruction) {
+            case "shake_screen" -> {
+                // trigger a screen shake effect
+            }
+            case "drop_item" -> {
+                MyEntity entity = event.animatable();
+                entity.spawnAtLocation(Items.DIAMOND);
+            }
+            default -> {
+                // handle unknown instructions gracefully
+            }
+        }
+    });
+```
+
+## Complete example with all three handlers
+
+```java MyEntity.java
+@Override
+public void registerControllers(AnimatableManager.ControllerRegistrar registrar) {
+    registrar.add(
+        new AnimationController<>(this, "combat", 4, state -> {
+            if (state.isCurrentAnimation(ATTACK_ANIM))
+                return PlayState.CONTINUE;
+            return state.setAndContinue(IDLE_ANIM);
+        })
+        .setSoundKeyframeHandler(event -> {
+            if (event.animatable().level().isClientSide()) {
+                String soundKey = event.keyframeData().getSound();
+                // resolve and play sound...
+            }
+        })
+        .setParticleKeyframeHandler(event -> {
+            if (event.animatable().level().isClientSide()) {
+                String effectKey = event.keyframeData().getEffect();
+                // resolve and spawn particle...
+            }
+        })
+        .setCustomInstructionKeyframeHandler(event -> {
+            String cmd = event.keyframeData().getInstructions();
+            // dispatch custom logic...
+        })
+    );
+}
+```
+
+All three setter methods return `this`, so they can be chained directly onto the controller at construction time alongside other modifiers such as `setAnimationSpeed` or `setOverrideEasingType`.

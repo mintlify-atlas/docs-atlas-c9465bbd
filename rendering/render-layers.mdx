@@ -1,0 +1,214 @@
+---
+title: "GeckoLib Render Layers: Glow, Armor, and Overlays"
+description: "Add glowing effects, worn armor, held items, and texture overlays to GeckoLib models using built-in render layers or a custom GeoRenderLayer subclass."
+keywords: ['geckolib', 'render layer', 'glow', 'armor layer', 'item in hand', 'texture layer', 'custom layer']
+---
+
+Render layers are additional rendering passes that execute after the base model has been submitted for a given frame. They give you a clean hook to draw effects on top of your animated model — an emissive glow mask, worn armor pieces, held items, an overlay texture — without touching the core rendering pipeline. Each layer is attached to a renderer instance and receives the same `RenderPassInfo` and `GeoRenderState` as the main pass.
+
+---
+
+## GeoRenderLayer
+
+`GeoRenderLayer<T, O, R>` is the abstract base class for all render layers. The type parameters are inherited from the renderer the layer is attached to.
+
+### Key methods to override
+
+```java GeoRenderLayer.java
+// Called before rendering; use to hide/show bones or prepare state.
+// Do NOT swap VertexConsumers or RenderTypes here.
+public void preRender(RenderPassInfo<R> renderPassInfo, SubmitNodeCollector renderTasks) {}
+
+// Primary render hook. Called after the model has been submitted.
+// Submit additional render tasks here (extra geometry, textures, etc.).
+public void submitRenderTask(RenderPassInfo<R> renderPassInfo, SubmitNodeCollector renderTasks) {}
+
+// Register per-bone render operations. The PoseStack is posed as if
+// the named bone is currently rendering even though this runs after the main pass.
+public void addPerBoneRender(RenderPassInfo<R> renderPassInfo,
+                             BiConsumer<GeoBone, PerBoneRender<R>> consumer) {}
+
+// Capture render-time data from the live animatable into the render state.
+// The animatable is NOT available during submitRenderTask, so write everything
+// you need here using DataTickets.
+public void addRenderData(T animatable, @Nullable O relatedObject,
+                          R renderState, float partialTick) {}
+```
+
+### Custom layer example
+
+```java FlashingOverlayLayer.java
+public class FlashingOverlayLayer<T extends Entity & GeoAnimatable, R extends EntityRenderState>
+        extends GeoRenderLayer<T, Void, R> {
+
+    private static final Identifier OVERLAY_TEXTURE =
+        Identifier.of("mymod", "textures/entity/cool_entity_overlay.png");
+
+    public FlashingOverlayLayer(GeoRenderer<T, Void, R> renderer) {
+        super(renderer);
+    }
+
+    @Override
+    public void submitRenderTask(RenderPassInfo<R> renderPassInfo,
+                                 SubmitNodeCollector renderTasks) {
+        // Only render the overlay on every other second
+        if ((renderPassInfo.renderState().ageInTicks / 20) % 2 == 0)
+            return;
+
+        RenderType renderType = RenderTypes.entityTranslucent(OVERLAY_TEXTURE);
+        this.renderer.submitRenderTasks(renderPassInfo, renderTasks.order(1), renderType);
+    }
+}
+```
+
+---
+
+## Attaching layers to a renderer
+
+Each GeckoLib renderer exposes a fluent `withRenderLayer` method that returns the renderer itself, so calls can be chained in the constructor.
+
+```java CoolEntityRenderer.java
+public CoolEntityRenderer(EntityRendererProvider.Context context) {
+    super(context, MyEntities.COOL_ENTITY);
+
+    withRenderLayer(renderer -> new AutoGlowingGeoLayer<>(renderer));
+    withRenderLayer(renderer -> new ItemInHandGeoLayer<>(context, renderer));
+}
+```
+
+Internally, layers are stored in a `GeoRenderLayersContainer`. The container lazily fires a `CompileRenderLayers` event the first time `getRenderLayers()` is accessed, allowing other mods to add layers via the event system without subclassing your renderer.
+
+---
+
+## Built-in layers
+
+### AutoGlowingGeoLayer
+
+Renders the model a second time at full brightness (`LightCoordsUtil.FULL_SKY`) using a custom emissive `RenderPipeline`. The emissive texture is derived automatically by appending `_glowmask` before the file extension of the base texture (e.g. `cool_entity.png` → `cool_entity_glowmask.png`).
+
+```java CoolEntityRenderer.java
+withRenderLayer(renderer -> new AutoGlowingGeoLayer<>(renderer));
+```
+
+**Override points**
+
+| Method | Purpose |
+|---|---|
+| `getTextureResource(R)` | Return a different glowmask texture path |
+| `shouldRespectWorldLighting(R)` | `true` to shade the emissive layer with world lighting |
+| `shouldAddZOffset(R)` | `true` to add a view-space z-offset (auto-enabled for armor) |
+| `getBrightness(R)` | Return a custom packed light value instead of full sky |
+
+```java CustomGlowLayer.java
+public class CustomGlowLayer<T extends GeoAnimatable, O, R extends GeoRenderState>
+        extends AutoGlowingGeoLayer<T, O, R> {
+
+    public CustomGlowLayer(GeoRenderer<T, O, R> renderer) {
+        super(renderer);
+    }
+
+    @Override
+    protected boolean shouldRespectWorldLighting(R renderState) {
+        // Allow the glow to dim in dark areas for a more subtle effect
+        return true;
+    }
+}
+```
+
+---
+
+### ItemArmorGeoLayer
+
+Renders worn armor (both GeckoLib and vanilla) on GeckoLib entity models. Each armor piece is rendered per-bone, giving fine-grained control over positioning. You provide a list of `RenderData` entries pairing bone names with `ArmorSegment` values.
+
+`ItemArmorGeoLayer` is abstract — you must implement `getRelevantBones`.
+
+```java CoolEntityArmorLayer.java
+public class CoolEntityArmorLayer<T extends LivingEntity & GeoAnimatable, R extends EntityRenderState & GeoRenderState>
+        extends ItemArmorGeoLayer<T, Void, R> {
+
+    private static final List<RenderData> BONES = List.of(
+        RenderData.head("helmetBone"),
+        RenderData.body("chestplateBone"),
+        RenderData.leftArm("leftArmBone"),
+        RenderData.rightArm("rightArmBone"),
+        RenderData.leftLeg("leftLegBone"),
+        RenderData.rightLeg("rightLegBone"),
+        RenderData.leftFoot("leftBootBone"),
+        RenderData.rightFoot("rightBootBone")
+    );
+
+    public CoolEntityArmorLayer(GeoRenderer<T, Void, R> renderer,
+                                EntityRendererProvider.Context context) {
+        super(renderer, context);
+    }
+
+    @Override
+    protected List<RenderData> getRelevantBones(RenderPassInfo<R> renderPassInfo) {
+        return BONES;
+    }
+}
+```
+
+Attach it in your renderer:
+
+```java CoolEntityRenderer.java
+withRenderLayer(renderer -> new CoolEntityArmorLayer<>(renderer, context));
+```
+
+---
+
+### ItemInHandGeoLayer
+
+Renders the items held in a `LivingEntity`'s hands, positioned relative to hand bones in your model. By default it expects bones named `RightHandItem` and `LeftHandItem`; pass alternate names to the constructor if yours differ.
+
+```java CoolEntityRenderer.java
+// Default bone names: RightHandItem, LeftHandItem
+withRenderLayer(renderer -> new ItemInHandGeoLayer<>(context, renderer));
+
+// Custom bone names
+withRenderLayer(renderer ->
+    new ItemInHandGeoLayer<>(context, renderer, "mainHandBone", "offHandBone"));
+```
+
+`ItemInHandGeoLayer` handles shields, left-handed entities, and the correct `ItemDisplayContext` (third-person right/left hand) automatically.
+
+---
+
+### TextureLayerGeoLayer
+
+Performs a full second render pass of the entire model using an alternate texture and optional `RenderType`. Use this for overlays that apply uniformly across all bones — damage tints, camouflage, magic shimmer, etc.
+
+```java CoolEntityRenderer.java
+Identifier overlayTexture = Identifier.of("mymod", "textures/entity/cool_entity_overlay.png");
+
+// Use the renderer's default RenderType with a different texture
+withRenderLayer(renderer -> new TextureLayerGeoLayer<>(renderer, overlayTexture));
+
+// Supply a custom RenderType factory
+withRenderLayer(renderer -> new TextureLayerGeoLayer<>(renderer, overlayTexture,
+    tex -> RenderTypes.entityTranslucent(tex)));
+```
+
+<Warning>
+`TextureLayerGeoLayer` re-renders every bone in the model. If you only need a different texture or render type on specific bones, use `CustomBoneTextureGeoLayer` instead to avoid the performance cost of a full second pass.
+</Warning>
+
+---
+
+## Summary
+
+<Steps>
+  <Step title="Choose or extend a layer">
+    Pick one of the built-in layers (`AutoGlowingGeoLayer`, `ItemArmorGeoLayer`, `ItemInHandGeoLayer`, `TextureLayerGeoLayer`) or extend `GeoRenderLayer` directly.
+  </Step>
+  <Step title="Capture runtime data">
+    If the layer needs data from the live animatable (not available during render), override `addRenderData` and write it into the `GeoRenderState` via `DataTicket`s.
+  </Step>
+  <Step title="Implement rendering logic">
+    Override `submitRenderTask` to submit your additional render geometry or texture pass. Use `preRender` only for bone visibility changes, not vertex/render-type work.
+  </Step>
+  <Step title="Attach to the renderer">
+    Call `withRenderLayer(renderer -> new YourLayer<>(renderer))` inside your renderer's constructor, or respond to the `CompileRenderLayers` event to add layers from a separate mod.
+  </Step>
+</Steps>

@@ -1,0 +1,100 @@
+---
+title: "Easing Types: Smooth Keyframe Interpolation in GeckoLib"
+description: "GeckoLib easing types control keyframe interpolation curves. Reference all 33 built-in easings and learn to register custom easing functions."
+---
+
+Easing types control the acceleration curve that GeckoLib uses when interpolating between two keyframe values. Without easing, every transition between keyframes moves at a constant rate — `linear`. By choosing a different easing type, you can make a bone start slowly and accelerate into the next pose (`easeIn`), decelerate as it arrives (`easeOut`), or do both symmetrically (`easeInOut`). Easing is defined per-keyframe in your Blockbench animation JSON and is applied automatically by the `AnimationController` at render time. You can also override the easing for an entire controller from code.
+
+## Built-in easing types
+
+GeckoLib ships with 31 built-in `EasingType` constants registered in `EasingType.java`. All string keys are lowercase and are how the animation JSON refers to each type.
+
+| Name (string key) | Constant |
+|---|---|
+| `linear` / `none` | `EasingType.LINEAR` |
+| `step` | `EasingType.STEP` |
+| `easeinsine` | `EasingType.EASE_IN_SINE` |
+| `easeoutsine` | `EasingType.EASE_OUT_SINE` |
+| `easeinoutsine` | `EasingType.EASE_IN_OUT_SINE` |
+| `easeinquad` | `EasingType.EASE_IN_QUAD` |
+| `easeoutquad` | `EasingType.EASE_OUT_QUAD` |
+| `easeinoutquad` | `EasingType.EASE_IN_OUT_QUAD` |
+| `easeincubic` | `EasingType.EASE_IN_CUBIC` |
+| `easeoutcubic` | `EasingType.EASE_OUT_CUBIC` |
+| `easeinoutcubic` | `EasingType.EASE_IN_OUT_CUBIC` |
+| `easeinquart` | `EasingType.EASE_IN_QUART` |
+| `easeoutquart` | `EasingType.EASE_OUT_QUART` |
+| `easeinoutquart` | `EasingType.EASE_IN_OUT_QUART` |
+| `easeinquint` | `EasingType.EASE_IN_QUINT` |
+| `easeoutquint` | `EasingType.EASE_OUT_QUINT` |
+| `easeinoutquint` | `EasingType.EASE_IN_OUT_QUINT` |
+| `easeinexpo` | `EasingType.EASE_IN_EXPO` |
+| `easeoutexpo` | `EasingType.EASE_OUT_EXPO` |
+| `easeinoutexpo` | `EasingType.EASE_IN_OUT_EXPO` |
+| `easeincirc` | `EasingType.EASE_IN_CIRC` |
+| `easeoutcirc` | `EasingType.EASE_OUT_CIRC` |
+| `easeinoutcirc` | `EasingType.EASE_IN_OUT_CIRC` |
+| `easeinback` | `EasingType.EASE_IN_BACK` |
+| `easeoutback` | `EasingType.EASE_OUT_BACK` |
+| `easeinoutback` | `EasingType.EASE_IN_OUT_BACK` |
+| `easeinelastic` | `EasingType.EASE_IN_ELASTIC` |
+| `easeoutelastic` | `EasingType.EASE_OUT_ELASTIC` |
+| `easeinoutelastic` | `EasingType.EASE_IN_OUT_ELASTIC` |
+| `easeinbounce` | `EasingType.EASE_IN_BOUNCE` |
+| `easeoutbounce` | `EasingType.EASE_OUT_BOUNCE` |
+| `easeinoutbounce` | `EasingType.EASE_IN_OUT_BOUNCE` |
+| `catmullrom` | `EasingType.CATMULLROM` |
+
+The `step`, `back`, `elastic`, and `bounce` types accept an optional numeric easing argument from the animation JSON to tune the shape of the curve (step count, overshoot amount, elasticity, and bounciness respectively).
+
+<Tip>
+  Visit [easings.net](https://easings.net/) for an interactive visual reference showing how each easing curve behaves.
+</Tip>
+
+## Applying an easing override on a controller
+
+By default the controller respects whatever easing type is set on each individual keyframe in the animation JSON. You can override all keyframes on a controller at once by calling `setOverrideEasingType`:
+
+```java MyEntity.java
+new AnimationController<>(this, "movement", 5, state -> state.setAndContinue(WALK_ANIM))
+    .setOverrideEasingType(EasingType.EASE_IN_OUT_CUBIC);
+```
+
+This forces every keyframe interpolation on that controller to use `EASE_IN_OUT_CUBIC`, regardless of what the JSON specifies. The method returns `this`, so it chains cleanly with other modifiers.
+
+<Note>
+  The easing override applies to all animations on the controller, including transition blends between animations. If you need per-animation easing control, set it on the individual keyframes in Blockbench instead.
+</Note>
+
+## Registering a custom easing type
+
+You can add your own easing curves to GeckoLib. All registrations must happen **during mod construction**, before any animation data is loaded.
+
+### Full EasingType (supports an optional easing argument)
+
+Use `GeckoLibUtil.addCustomEasingType` when your curve needs to be parameterized — the `@Nullable Double` argument comes from the animation JSON's easing argument field, and may be `null` if the author did not supply one.
+
+```java MyMod.java
+// During mod construct
+GeckoLibUtil.addCustomEasingType("myquintic", easingArg -> {
+    double exponent = easingArg != null ? easingArg : 5.0;
+    return t -> Math.pow(t, exponent);
+});
+```
+
+### Simple EasingType (no argument)
+
+Use `GeckoLibUtil.addCustomSimpleEasingType` for a fixed curve that does not need a parameter. The `Double2DoubleFunction` receives the normalized time `t` (0–1) and returns the transformed value.
+
+```java MyMod.java
+// During mod construct
+GeckoLibUtil.addCustomSimpleEasingType("smootherstep", t ->
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+);
+```
+
+After registration, your easing key can be used in the animation JSON just like any built-in type.
+
+<Warning>
+  Easing types must be registered during mod construct. Registering them later — for example, inside a state handler or a resource reload callback — can cause animation data already in the cache to reference an unknown type and silently fall back to `linear`.
+</Warning>

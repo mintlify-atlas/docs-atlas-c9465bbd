@@ -1,0 +1,182 @@
+---
+title: "RawAnimation: Building Animation Sequences in GeckoLib"
+description: "Explore RawAnimation's builder API to chain animation stages with precise loop control, including thenPlay, thenLoop, thenWait, and LoopType options."
+---
+
+`RawAnimation` is an immutable-style builder that describes a sequence of animation stages to hand to an `AnimationController`. Each stage names an animation from your `.animation.json` file and specifies what should happen when that animation finishes — loop, stop, hold the last frame, or proceed to the next stage. Because GeckoLib compares `RawAnimation` instances by value to avoid restarting an already-playing animation, you should **always cache instances as `static final` fields** rather than constructing them inside the state handler on every frame.
+
+## Creating a RawAnimation
+
+Every `RawAnimation` starts with `RawAnimation.begin()` and is extended by chaining builder methods:
+
+```java MyEntity.java
+private static final RawAnimation IDLE_ANIM =
+    RawAnimation.begin().thenLoop("state.idle");
+
+private static final RawAnimation OPEN_THEN_HOLD =
+    RawAnimation.begin()
+        .thenPlay("action.open")
+        .thenPlayAndHold("state.open");
+```
+
+## Builder Methods
+
+### `begin()`
+
+```java RawAnimation.java
+public static RawAnimation begin()
+```
+
+Creates a new, empty `RawAnimation`. This is always your starting point — there is no public constructor.
+
+---
+
+### `thenPlay(String animationName)`
+
+```java RawAnimation.java
+public RawAnimation thenPlay(String animationName)
+```
+
+Appends the named animation and defers looping behaviour to whatever is defined in the animation JSON (`LoopType.DEFAULT`). Use this when you want the JSON author to control whether the animation loops.
+
+---
+
+### `thenLoop(String animationName)`
+
+```java RawAnimation.java
+public RawAnimation thenLoop(String animationName)
+```
+
+Appends the named animation and forces it to loop continuously, ignoring any loop setting in the JSON. The animation repeats until the `AnimationStateHandler` returns `PlayState.STOP` or sets a different animation.
+
+---
+
+### `thenPlayAndHold(String animationName)`
+
+```java RawAnimation.java
+public RawAnimation thenPlayAndHold(String animationName)
+```
+
+Plays the named animation once, then freezes on the final frame (`LoopType.HOLD_ON_LAST_FRAME`). Useful for open/close doors, deploy animations, or any state that needs to persist visually.
+
+---
+
+### `thenPlayXTimes(String animationName, int playCount)`
+
+```java RawAnimation.java
+public RawAnimation thenPlayXTimes(String animationName, int playCount)
+```
+
+Repeats the named animation exactly `playCount` times, then proceeds to the next chained stage or stops. Internally adds `playCount` stages: the first `playCount - 1` use `PLAY_ONCE` and the last uses `DEFAULT`.
+
+---
+
+### `thenWait(int ticks)`
+
+```java RawAnimation.java
+public RawAnimation thenWait(int ticks)
+```
+
+Inserts an invisible pause stage of `ticks` game ticks before the next animation begins. The animatable holds whatever pose it ended on during the wait.
+
+---
+
+### `then(String animationName, LoopType loopType)`
+
+```java RawAnimation.java
+public RawAnimation then(String animationName, LoopType loopType)
+```
+
+The low-level method used by all other helpers. Appends a stage with an explicit `LoopType`, giving you full control over what happens when the animation finishes.
+
+---
+
+### `copyOf(RawAnimation other)`
+
+```java RawAnimation.java
+public static RawAnimation copyOf(RawAnimation other)
+```
+
+Creates a shallow copy of an existing `RawAnimation`. Use this to build a variant sequence from a shared base without mutating the original:
+
+```java MyEntity.java
+private static final RawAnimation BASE = RawAnimation.begin().thenPlay("action.start");
+private static final RawAnimation LOOPED_VARIANT = RawAnimation.copyOf(BASE).thenLoop("state.active");
+```
+
+## LoopType
+
+`LoopType` is a functional interface that decides whether an animation stage should continue playing after it finishes. Four built-in values cover most needs:
+
+| Constant | Behaviour |
+|---|---|
+| `LoopType.DEFAULT` | Delegates to the `loop` field in the animation JSON — the JSON controls looping. |
+| `LoopType.PLAY_ONCE` | Plays once then stops (or advances to the next stage). Equivalent to `loop: false` in JSON. |
+| `LoopType.LOOP` | Loops indefinitely. Equivalent to `loop: true` in JSON. |
+| `LoopType.HOLD_ON_LAST_FRAME` | Advances the timeline to the last frame and stays there until the animation is changed. |
+
+Custom loop types can be implemented by providing your own `LoopType` lambda and registering it via `GeckoLibUtil.addCustomLoopType`.
+
+## The Stage Record
+
+Every builder method ultimately creates a `RawAnimation.Stage` record:
+
+```java RawAnimation.java
+public record Stage(String animationName, LoopType loopType, int waitTicks)
+```
+
+| Field | Meaning |
+|---|---|
+| `animationName` | Must exactly match the animation name in the `.animation.json` file |
+| `loopType` | Controls replay behaviour when the animation finishes |
+| `waitTicks` | Only non-zero for stages created by `thenWait(int)` |
+
+You rarely interact with `Stage` directly — the builder methods handle it — but it is useful to know that `RawAnimation` equality is based on the hash of its stage list, which is why duplicate `setAnimation` calls are safe.
+
+## Chaining Examples
+
+<CodeGroup>
+
+```java Simple loop
+private static final RawAnimation IDLE =
+    RawAnimation.begin().thenLoop("state.idle");
+```
+
+```java One-shot action
+private static final RawAnimation ATTACK =
+    RawAnimation.begin().thenPlay("action.attack");
+```
+
+```java Multi-stage sequence
+// Play an intro, wait 10 ticks, then loop a hold state
+private static final RawAnimation DEPLOY =
+    RawAnimation.begin()
+        .thenPlay("action.deploy")
+        .thenWait(10)
+        .thenPlayAndHold("state.deployed");
+```
+
+```java Repeat then transition
+// Shake 3 times, then snap to a final pose
+private static final RawAnimation SHAKE_AND_STOP =
+    RawAnimation.begin()
+        .thenPlayXTimes("action.shake", 3)
+        .thenPlayAndHold("state.stunned");
+```
+
+```java Explicit LoopType
+private static final RawAnimation CUSTOM =
+    RawAnimation.begin()
+        .then("state.windup", LoopType.PLAY_ONCE)
+        .then("state.active", LoopType.LOOP);
+```
+
+</CodeGroup>
+
+<Tip>
+  Animation names must match the `animation.name` field inside your `.animation.json` exactly, including any dot-separated namespacing such as `"move.walk"` or `"action.attack"`.
+</Tip>
+
+<Warning>
+  Never construct `RawAnimation` instances inside a method that runs every frame (such as `registerControllers` or the state handler lambda). Doing so creates a new object on every call, which causes equality checks to fail and restarts the animation from the beginning every frame.
+</Warning>

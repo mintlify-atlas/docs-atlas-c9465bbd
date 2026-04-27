@@ -1,0 +1,175 @@
+---
+title: "Animation Controllers: Managing Playback in GeckoLib"
+description: "Learn how AnimationController drives animation state in GeckoLib, including constructors, state handlers, triggerable animations, and playback modifiers."
+---
+
+The `AnimationController` is the central object that decides which animation plays, when it plays, and how it transitions. Every render frame, GeckoLib calls the controller's `AnimationStateHandler` for each visible animatable, giving your code the chance to set the current animation and return a `PlayState` that tells the controller what to do next. Controllers are registered once per animatable type through `AnimatableManager.ControllerRegistrar`, but each living instance of your animatable gets its own controller state.
+
+## Constructors
+
+Three constructors are available, each adding progressively more configuration.
+
+<Tabs>
+  <Tab title="Default name, no transition">
+    ```java AnimationController.java
+    // Name defaults to "Default", transition length is 0 ticks
+    new AnimationController<>(stateHandler)
+    ```
+    Use this when you have a single controller and don't need named access or smooth transitions between animations.
+  </Tab>
+  <Tab title="Named, no transition">
+    ```java AnimationController.java
+    // Custom name, transition length is 0 ticks
+    new AnimationController<>(name, stateHandler)
+    ```
+    Naming the controller is required when you register multiple controllers on the same animatable, or when you need to target a specific controller from `AnimatableManager.tryTriggerAnimation(controllerName, animName)`.
+  </Tab>
+  <Tab title="Named, with transition">
+    ```java AnimationController.java
+    // Custom name and a transition interpolation period measured in ticks
+    new AnimationController<>(name, transitionTicks, stateHandler)
+    ```
+    `transitionTicks` controls how many game ticks GeckoLib uses to smoothly blend from the outgoing animation pose into the new one. A value of `5` gives a quarter-second blend at 20 TPS.
+  </Tab>
+</Tabs>
+
+## AnimationStateHandler
+
+`AnimationStateHandler<T>` is a `@FunctionalInterface` that you implement (typically as a lambda) to decide which animation should play each frame.
+
+```java AnimationStateHandler
+@FunctionalInterface
+public interface AnimationStateHandler<A extends GeoAnimatable> {
+    PlayState handle(AnimationTest<A> animatable);
+}
+```
+
+The `AnimationTest` parameter gives you access to the animatable instance, the render state, and convenience helpers:
+
+| Method | Purpose |
+|---|---|
+| `state.setAndContinue(RawAnimation)` | Set the animation and return `CONTINUE` in one call |
+| `state.setAnimation(RawAnimation)` | Set the animation without returning |
+| `state.isMoving()` | True when the entity is considered to be moving |
+| `state.isCurrentAnimation(RawAnimation)` | Check whether this animation is already playing |
+| `state.isCurrentAnimationStage(String)` | Check which named stage is currently active |
+| `state.controller()` | Direct access to the `AnimationController` |
+
+### PlayState return values
+
+| Value | Effect |
+|---|---|
+| `PlayState.CONTINUE` | Start or continue the current animation |
+| `PlayState.PAUSE` | Freeze playback at the current position without resetting |
+| `PlayState.STOP` | Stop and reset to the beginning for the next animation |
+
+## Registering Controllers
+
+Implement `GeoAnimatable#registerControllers` and pass your controllers to the `ControllerRegistrar`:
+
+```java MyEntity.java
+@Override
+public void registerControllers(AnimatableManager.ControllerRegistrar registrar) {
+    registrar.add(
+        new AnimationController<>(this, "movement", 5, state -> {
+            if (state.isMoving())
+                return state.setAndContinue(WALK_ANIM);
+
+            return state.setAndContinue(IDLE_ANIM);
+        })
+    );
+}
+```
+
+`ControllerRegistrar.add()` accepts either a single controller or a varargs list of controllers.
+
+## Triggerable Animations
+
+Some animations should fire on demand rather than run every frame — attacks, interactions, emotes. Register them with `triggerableAnim` at construction time, then fire them later via `AnimatableManager`.
+
+```java MyEntity.java
+// Register the triggerable animation on the controller
+new AnimationController<>(this, "actions", 3, state -> PlayState.STOP)
+    .triggerableAnim("attack", ATTACK_ANIM)
+    .triggerableAnim("open", OPEN_ANIM)
+```
+
+Trigger from anywhere that has access to the `AnimatableManager`:
+
+```java MyEntity.java
+// Fire via GeoEntity convenience methods (entities)
+this.triggerAnim(null, "attack");             // lazy search all controllers
+this.triggerAnim("actions", "attack");        // direct lookup (faster)
+
+// Or access the manager directly via the cache
+this.getAnimatableInstanceCache()
+    .getManagerForId(getId())
+    .tryTriggerAnimation("actions", "attack");
+```
+
+You can also call `controller.setAnimation(RawAnimation)` directly inside the state handler to imperatively set the active animation without the triggerable registration mechanism.
+
+<Note>
+  `setAnimation` is idempotent — calling it repeatedly with the same `RawAnimation` instance continues the current playback rather than restarting it. This is intentional and is why caching `RawAnimation` instances statically is important.
+</Note>
+
+## Controller Modifiers
+
+All modifier methods return `this`, so they can be chained at construction time.
+
+| Method | Description |
+|---|---|
+| `setAnimationSpeed(double speed)` | Multiplies the playback rate. `2.0` plays twice as fast, `0.5` plays at half speed. Default is `1.0`. |
+| `setTransitionTicks(int ticks)` | Updates the blend duration between animations. Takes effect on the next animation change. |
+| `setOverrideEasingType(EasingType)` | Overrides the per-keyframe easing defined in the JSON for every keyframe on this controller. |
+| `additiveAnimations()` | Marks this controller as additive — bone values are added to the existing pose instead of replacing it. |
+| `receiveTriggeredAnimations()` | Allows the `AnimationStateHandler` to be called even while a triggered animation is playing, so you can check `controller.isPlayingTriggeredAnimation()`. |
+
+## Multiple Controllers
+
+Registering more than one controller lets you layer independent animations on different bone sets simultaneously — for example, a walk cycle on the legs while a separate controller handles arm gestures.
+
+```java MyEntity.java
+@Override
+public void registerControllers(AnimatableManager.ControllerRegistrar registrar) {
+    registrar.add(
+        new AnimationController<>(this, "legs", 4, state -> {
+            if (state.isMoving())
+                return state.setAndContinue(WALK_ANIM);
+            return state.setAndContinue(IDLE_ANIM);
+        }),
+        new AnimationController<>(this, "arms", 2, state -> {
+            return state.setAndContinue(ARMS_IDLE_ANIM);
+        })
+            .triggerableAnim("wave", WAVE_ANIM)
+            .triggerableAnim("attack", ATTACK_ANIM)
+    );
+}
+```
+
+## Complete Example
+
+```java MyEntity.java
+private static final RawAnimation IDLE_ANIM  = RawAnimation.begin().thenLoop("state.idle");
+private static final RawAnimation WALK_ANIM  = RawAnimation.begin().thenLoop("move.walk");
+private static final RawAnimation ATTACK_ANIM = RawAnimation.begin().thenPlay("action.attack");
+
+@Override
+public void registerControllers(AnimatableManager.ControllerRegistrar registrar) {
+    registrar.add(
+        // Movement controller with 5-tick blend
+        new AnimationController<>(this, "movement", 5, state -> {
+            if (state.isMoving())
+                return state.setAndContinue(WALK_ANIM);
+            return state.setAndContinue(IDLE_ANIM);
+        }),
+
+        // Action controller: triggered only, stops when idle
+        new AnimationController<>(this, "actions", 3, state -> PlayState.STOP)
+            .triggerableAnim("attack", ATTACK_ANIM)
+            .setSoundKeyframeHandler(event -> {
+                // play sound at event.keyframeData().getSound()
+            })
+    );
+}
+```

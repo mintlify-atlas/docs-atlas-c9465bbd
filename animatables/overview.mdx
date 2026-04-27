@@ -1,0 +1,80 @@
+---
+title: "GeoAnimatable Interface Hierarchy and Overview"
+description: "Learn how GeckoLib's animatable interfaces are structured, which cache type to use, and how to choose the right interface for your mod object."
+---
+
+Every object that GeckoLib animates must implement `GeoAnimatable` or one of its sub-interfaces. The interface you choose determines how animation state is stored, how triggers are networked, and which renderer integration hooks are available. Picking the correct interface from the start avoids subtle bugs around cache type mismatches and networking.
+
+## Interface hierarchy
+
+```
+GeoAnimatable
+├── GeoEntity            (entities, projectiles)
+├── GeoBlockEntity       (block entities)
+└── SingletonGeoAnimatable
+    ├── GeoItem          (items and armor)
+    └── GeoReplacedEntity (replacing vanilla entity rendering)
+```
+
+`GeoAnimatable` is the root interface. It declares two methods that every animatable must implement. `GeoEntity` and `GeoBlockEntity` extend it directly for objects that are instanced — each live object in the world has its own animation state. `SingletonGeoAnimatable` extends it for flyweight objects where a single Java instance serves many in-world stacks or entities; `GeoItem` and `GeoReplacedEntity` extend `SingletonGeoAnimatable`.
+
+## Required methods
+
+Every `GeoAnimatable` implementation must provide exactly two methods.
+
+### `registerControllers`
+
+```java
+void registerControllers(AnimatableManager.ControllerRegistrar controllers)
+```
+
+Called once per animatable instance to register its `AnimationController` objects. Add controllers by calling `controllers.add(...)`. Each controller handles one animation at a time; use multiple controllers for concurrent animations on separate bone groups.
+
+### `getAnimatableInstanceCache`
+
+```java
+AnimatableInstanceCache getAnimatableInstanceCache()
+```
+
+Returns the cache that stores per-instance animation state. You should create this once, store it in a field, and return that same field on every call. Use `GeckoLibUtil.createInstanceCache(this)` to let GeckoLib pick the correct cache type automatically.
+
+## Instanced vs singleton caches
+
+GeckoLib uses two concrete cache implementations with different storage strategies.
+
+| Cache type | Used by | How instances are differentiated |
+|---|---|---|
+| `InstancedAnimatableInstanceCache` | `GeoEntity`, `GeoBlockEntity` | Each Java object has its own cache; the entity/block entity *is* the instance |
+| `SingletonAnimatableInstanceCache` | `GeoItem`, `GeoReplacedEntity` | One cache shared across all stacks/entities; differentiated by a numeric ID |
+
+`GeckoLibUtil.createInstanceCache(this)` inspects whether `this` is an `Entity` or `BlockEntity` and returns the right type. For items and replaced entities, it defers to `animatableCacheOverride()`, which `SingletonGeoAnimatable` implements to return a `SingletonAnimatableInstanceCache`.
+
+<Note>
+For `GeoItem`, if `isPerspectiveAware()` returns `true`, `animatableCacheOverride()` returns a `ContextBasedAnimatableInstanceCache` instead, which tracks animation state per `ItemDisplayContext`. This is handled automatically when you call `GeckoLibUtil.createInstanceCache(this)`.
+</Note>
+
+## Animatable pages
+
+<CardGroup cols={2}>
+  <Card title="Entities" icon="dragon" href="/animatables/entities">
+    Make a Minecraft entity use GeckoLib animations with `GeoEntity`.
+  </Card>
+  <Card title="Block entities" icon="cube" href="/animatables/block-entities">
+    Animate block entities using the `GeoBlockEntity` interface.
+  </Card>
+  <Card title="Items and armor" icon="sword" href="/animatables/items-and-armor">
+    Apply GeckoLib animations to items and armor with `GeoItem`.
+  </Card>
+  <Card title="Replaced entities" icon="repeat" href="/animatables/replaced-entities">
+    Re-skin vanilla or other mods' entities without changing their class.
+  </Card>
+</CardGroup>
+
+## Advanced: `animatableCacheOverride`
+
+```java
+@ApiStatus.OverrideOnly
+default @Nullable AnimatableInstanceCache animatableCacheOverride()
+```
+
+This method is called by `GeckoLibUtil.createInstanceCache` before falling back to default logic. Returning a non-null value from this method replaces the default cache entirely. Do not override it unless you are implementing a custom cache strategy; incorrect usage will break animation state tracking.

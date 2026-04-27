@@ -1,0 +1,136 @@
+---
+title: "Replacing Entity Renderers with GeoReplacedEntity"
+description: "Use GeoReplacedEntity to render an existing vanilla or third-party entity with a custom GeckoLib model without modifying or subclassing the entity class itself."
+---
+
+`GeoReplacedEntity` lets you swap out the renderer for an existing entity — vanilla mobs, projectiles, or entities from other mods — without touching the entity class. You write a standalone object that implements `GeoReplacedEntity` and register it alongside a `GeoReplacedEntityRenderer` for the target entity type. GeckoLib routes all animation state through your object.
+
+<Note>
+`GeoReplacedEntity` extends `SingletonGeoAnimatable`, **not** `GeoEntity`. The replaced entity's Java class never changes; your `GeoReplacedEntity` implementation is a separate singleton. This means `GeoEntity` and `GeoReplacedEntity` are mutually exclusive for a given entity type — use `GeoReplacedEntity` when you cannot or do not want to modify the entity class, and `GeoEntity` when you own the entity class.
+</Note>
+
+## How it works
+
+Your `GeoReplacedEntity` class is a singleton (one instance, not one per entity). The live entity from the world is passed into `triggerAnim` and `stopTriggeredAnim` as `relatedEntity`, which GeckoLib uses to look up the correct per-entity `AnimatableManager` by `relatedEntity.getId()` and to route network packets.
+
+## Implementation
+
+<Steps>
+  <Step title="Create your GeoReplacedEntity class">
+    Implement `GeoReplacedEntity`, create a singleton cache, and register controllers as you would for any animatable.
+
+    ```java MyReplacedCow.java
+    import com.geckolib.animatable.GeoReplacedEntity;
+    import com.geckolib.animatable.instance.AnimatableInstanceCache;
+    import com.geckolib.animatable.manager.AnimatableManager;
+    import com.geckolib.animation.AnimationController;
+    import com.geckolib.animation.RawAnimation;
+    import com.geckolib.util.GeckoLibUtil;
+
+    public class MyReplacedCow implements GeoReplacedEntity {
+
+        public static final MyReplacedCow INSTANCE = new MyReplacedCow();
+
+        private static final RawAnimation IDLE_ANIM =
+            RawAnimation.begin().thenLoop("animation.cow.idle");
+        private static final RawAnimation PANIC_ANIM =
+            RawAnimation.begin().thenPlay("animation.cow.panic");
+
+        private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+
+        private MyReplacedCow() {
+            // Singleton — do not instantiate directly, use INSTANCE
+            SingletonGeoAnimatable.registerSyncedAnimatable(this);
+        }
+
+        @Override
+        public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+            controllers.add(
+                new AnimationController<>(this, "controller", 5, state ->
+                    state.setAndContinue(IDLE_ANIM)
+                )
+                .triggerableAnim("panic", PANIC_ANIM)
+            );
+        }
+
+        @Override
+        public AnimatableInstanceCache getAnimatableInstanceCache() {
+            return this.cache;
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Create a GeoReplacedEntityRenderer">
+    Extend `GeoReplacedEntityRenderer`, parameterized to the **vanilla entity type** being replaced and your `GeoReplacedEntity` type.
+
+    ```java MyReplacedCowRenderer.java
+    import com.geckolib.renderer.GeoReplacedEntityRenderer;
+    import net.minecraft.client.renderer.entity.EntityRendererProvider;
+    import net.minecraft.world.entity.animal.Cow;
+
+    public class MyReplacedCowRenderer extends GeoReplacedEntityRenderer<Cow, MyReplacedCow> {
+
+        public MyReplacedCowRenderer(EntityRendererProvider.Context context) {
+            super(context, new MyReplacedCowModel(), MyReplacedCow.INSTANCE);
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Register the replacement renderer">
+    Register your renderer for the target entity type during client setup. The exact API varies by mod loader.
+
+    <Tabs>
+      <Tab title="NeoForge / Forge">
+        ```java ClientSetup.java
+        // Inside your EntityRenderersEvent.RegisterRenderers handler
+        event.registerEntityRenderer(EntityType.COW, MyReplacedCowRenderer::new);
+        ```
+      </Tab>
+      <Tab title="Fabric">
+        ```java ClientModInitializer.java
+        // Inside your ClientModInitializer
+        EntityRendererRegistry.register(EntityType.COW, MyReplacedCowRenderer::new);
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+## Triggering animations
+
+`GeoReplacedEntity` overrides the `triggerAnim` signature to require a `relatedEntity` parameter. This is the live entity from the world whose ID is used to locate the correct `AnimatableManager`.
+
+### `triggerAnim`
+
+```java
+default void triggerAnim(Entity relatedEntity, @Nullable String controllerName, String animName)
+```
+
+Plays the named triggerable animation. The animation must have been registered with `.triggerableAnim(name, rawAnimation)` on the controller.
+
+### `stopTriggeredAnim`
+
+```java
+default void stopTriggeredAnim(Entity relatedEntity, @Nullable String controllerName, @Nullable String animName)
+```
+
+Stops a previously triggered animation. Pass `null` for `animName` to stop any active triggered animation on the given controller.
+
+### Example
+
+```java
+// Somewhere that has access to the Cow entity instance (e.g., an event handler or mixin)
+// relatedEntity is the actual Cow from the world
+MyReplacedCow.INSTANCE.triggerAnim(cowEntity, "controller", "panic");
+
+// Stop the triggered animation
+MyReplacedCow.INSTANCE.stopTriggeredAnim(cowEntity, "controller", "panic");
+```
+
+Both methods follow the same client/server dispatch pattern as `GeoEntity`: calling from the server sends a network packet to all tracking clients; calling from the client applies locally only.
+
+<Tip>
+Call `triggerAnim` and `stopTriggeredAnim` from the server to keep animation state synchronized across all players seeing the entity.
+</Tip>

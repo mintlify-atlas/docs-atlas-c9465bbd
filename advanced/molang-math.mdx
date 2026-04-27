@@ -1,0 +1,187 @@
+---
+title: "MoLang & Math Expressions in GeckoLib"
+description: "Learn how GeckoLib evaluates MoLang expressions from animation JSON files, which query variables are available, and how to set custom variable values."
+---
+
+GeckoLib supports a subset of [MoLang](https://learn.microsoft.com/en-us/minecraft/creator/reference/content/molangreference/examples/molangconcepts/molangintroduction), the math expression language used in Bedrock Edition animation files. When you author animations in Blockbench and export them, numeric keyframe values can be replaced with MoLang expressions that are evaluated at runtime — giving you access to live entity state, animation time, health, and more without writing any Java code.
+
+## How GeckoLib evaluates expressions
+
+Animation JSON files produced by Blockbench can contain string expressions wherever a numeric value is expected — for example in bone rotation, scale, or position keyframes. When GeckoLib loads an animation file it compiles those strings into a tree of `MathValue` objects using `MathParser`. At render time each expression is evaluated against the current `ControllerState`, giving it access to the current animation controller, the animatable's live data, and all registered `query.*` variables.
+
+The parser supports the full set of `math.*` functions listed below, ternary expressions (`condition ? ifTrue : ifFalse`), compound statements with `return`, and variable assignment.
+
+### Supported math functions
+
+| Function | Description |
+|---|---|
+| `math.abs(x)` | Absolute value |
+| `math.sin(x)` / `math.cos(x)` | Sine / cosine (degrees) |
+| `math.asin(x)` / `math.acos(x)` / `math.atan(x)` / `math.atan2(y,x)` | Inverse trig |
+| `math.sqrt(x)` | Square root |
+| `math.pow(x,n)` | Power |
+| `math.exp(x)` | Exponential (`e^x`) |
+| `math.ln(x)` | Natural log |
+| `math.floor(x)` / `math.ceil(x)` / `math.round(x)` / `math.trunc(x)` | Rounding |
+| `math.clamp(x,min,max)` | Clamp |
+| `math.min(a,b)` / `math.max(a,b)` | Min / max |
+| `math.lerp(a,b,t)` / `math.lerprotate(a,b,t)` | Linear interpolation |
+| `math.hermite_blend(t)` | Smooth-step blend |
+| `math.mod(a,b)` | Modulo |
+| `math.random(lo,hi)` / `math.random_integer(lo,hi)` | Random number |
+| `math.die_roll(n,lo,hi)` / `math.die_roll_integer(n,lo,hi)` | Dice-roll |
+| `math.pi` | π constant |
+| `math.to_deg(r)` / `math.to_rad(d)` | Unit conversion |
+
+## Available query variables
+
+These are set automatically by GeckoLib before each render pass. Queries that reference entity-specific data return `0` when the animatable is not the relevant type.
+
+### Always available
+
+| Query | Value |
+|---|---|
+| `query.anim_time` | Seconds elapsed in the current animation |
+| `query.life_time` | Total render lifetime of the animatable (seconds) |
+| `query.controller_speed` | Current animation playback speed |
+| `query.actor_count` | Number of visible entities on screen |
+| `query.frame_alpha` | Partial tick (0–1) for the current frame |
+| `query.time_of_day` | Normalised time of day (0–1) |
+| `query.day` | Absolute day count |
+| `query.time_stamp` | Game time in ticks |
+| `query.moon_phase` | Moon phase index (0–7) |
+| `query.moon_brightness` | Brightness multiplier for the current moon phase |
+| `query.cardinal_player_facing` | Direction the local player is facing |
+| `query.player_level` | Experience level of the local player |
+| `query.is_first_person` | `1` when the camera is in first-person |
+| `query.has_cape` | `1` when the local player has a cape |
+| `PI` / `E` | Mathematical constants |
+
+### Block entities
+
+| Query | Value |
+|---|---|
+| `query.block_state` | Index of the current block state in the state definition |
+
+### All entities
+
+| Query | Value |
+|---|---|
+| `query.is_alive`, `query.is_moving`, `query.is_on_ground` | Boolean entity states (`1`/`0`) |
+| `query.is_invisible`, `query.is_on_fire`, `query.is_silent` | Boolean entity states |
+| `query.is_sneaking`, `query.is_sprinting`, `query.is_swimming`, `query.is_riding` | Boolean entity states |
+| `query.is_in_water`, `query.is_in_lava`, `query.is_in_water_or_rain` | Boolean entity states |
+| `query.is_leashed`, `query.has_rider`, `query.has_player_rider` | Boolean entity states |
+| `query.is_angry`, `query.is_breathing`, `query.is_fire_immune` | Boolean entity states |
+| `query.has_collision`, `query.has_gravity`, `query.has_owner` | Boolean entity states |
+| `query.body_x_rotation` / `query.body_y_rotation` | Body rotation angles |
+| `query.cardinal_facing` / `query.cardinal_facing_2d` | Facing direction index |
+| `query.distance_from_camera` | Distance in blocks from the camera |
+| `query.get_actor_info_id` | Entity network ID |
+| `query.equipment_count` | Number of filled armour slots |
+| `query.vertical_speed` | Vertical delta movement |
+| `query.yaw_speed` | Change in yaw per tick |
+| `query.movement_direction` | Direction index of current movement |
+| `query.rider_body_x_rotation` / `query.rider_body_y_rotation` | Rider body rotation |
+| `query.rider_head_x_rotation` / `query.rider_head_y_rotation` | Rider head rotation |
+| `query.is_saddled` | `1` if a saddle is equipped |
+
+### Living entities
+
+| Query | Value |
+|---|---|
+| `query.health` / `query.max_health` | Current and max health |
+| `query.hurt_time` / `query.death_ticks` / `query.invulnerable_ticks` | Damage timers |
+| `query.head_x_rotation` / `query.head_y_rotation` | Head look angles |
+| `query.is_baby`, `query.is_sleeping`, `query.is_using_item`, `query.is_wall_climbing` | Boolean states |
+| `query.blocking` | `1` if currently blocking with a shield |
+| `query.limb_swing` / `query.limb_swing_amount` | Walk animation state |
+| `query.ground_speed` | Horizontal speed |
+| `query.scale` | Entity scale multiplier |
+| `query.sleep_rotation` | Yaw of the bed the entity is sleeping in |
+| `query.has_head_gear` | `1` if a helmet is equipped |
+| `query.main_hand_item_use_duration` / `query.main_hand_item_max_duration` | Item use timing |
+
+### Mobs
+
+| Query | Value |
+|---|---|
+| `query.can_walk`, `query.can_fly`, `query.can_swim`, `query.can_climb` | Navigation capabilities (`1`/`0`) |
+
+### Items
+
+| Query | Value |
+|---|---|
+| `query.is_enchanted`, `query.is_stackable` | Boolean item states |
+| `query.remaining_durability` / `query.max_durability` | Durability values |
+| `query.item_max_use_duration` | Maximum use duration in ticks |
+
+## Expression examples in Blockbench
+
+The following snippets show MoLang expressions as they appear in a `.animation.json` file exported from Blockbench.
+
+```json title="animations/my_creature.animation.json"
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "animation.my_creature.idle": {
+      "loop": true,
+      "bones": {
+        "body": {
+          "rotation": ["math.sin(query.anim_time * 45) * 5", "0", "0"]
+        }
+      }
+    },
+    "animation.my_creature.walk": {
+      "loop": true,
+      "bones": {
+        "left_leg": {
+          "rotation": ["math.sin(query.limb_swing * 57.3) * query.limb_swing_amount * 30", "0", "0"]
+        },
+        "right_leg": {
+          "rotation": ["-math.sin(query.limb_swing * 57.3) * query.limb_swing_amount * 30", "0", "0"]
+        }
+      }
+    },
+    "animation.my_creature.hurt": {
+      "loop": false,
+      "bones": {
+        "head": {
+          "rotation": ["query.hurt_time > 0 ? math.sin(query.hurt_time * 30) * 10 : 0", "0", "0"]
+        }
+      }
+    }
+  }
+}
+```
+
+<Tip>
+`query.anim_time` is measured in seconds. Multiply by 45 or 57.3 to convert to usable degrees for `math.sin` / `math.cos`.
+</Tip>
+
+## Setting custom variable values from Java
+
+You can define your own `query.*` variables and push values into them at any point. Use `MolangQueries.setVariableValue` for a simple static value, or `setVariableFunction` for one that is evaluated each render frame.
+
+```java title="MyMod.java (mod constructor)"
+// Static value — set once
+MolangQueries.setVariableValue("query.my_custom_flag", 1.0);
+
+// Dynamic value — evaluated per render frame using the current ControllerState
+MolangQueries.setVariableFunction("query.my_dynamic_value", state -> {
+    // state gives you access to the current AnimationController, animation time, etc.
+    return state.controller().getCurrentAnimationTime() * 2.0;
+});
+```
+
+For variables that depend on the animatable object itself (e.g. entity data), use `setActorVariable`, which receives an `Actor<T>` record containing the animatable, render state, controller, and camera position:
+
+```java title="MyMod.java (mod constructor)"
+MolangQueries.<MyEntity>setActorVariable("query.my_entity_value", actor -> {
+    return actor.animatable().getMyCustomValue();
+});
+```
+
+<Note>
+Actor variables cannot be overridden by `setVariableValue` or `setVariableFunction` after they are registered. Register them once during mod construction.
+</Note>

@@ -1,0 +1,131 @@
+---
+title: "Animating Block Entities with GeoBlockEntity"
+description: "Learn how to implement GeoBlockEntity to add GeckoLib animations to your Minecraft block entities, including triggered animations and cache setup."
+---
+
+`GeoBlockEntity` is the `GeoAnimatable` sub-interface for Minecraft block entities. Implementing it on a `BlockEntity` subclass gives you access to GeckoLib's animation controller system, a singleton-style instance cache (all state is stored under a single ID since a block entity occupies exactly one position), and automatic network syncing for triggered animations.
+
+## Implementation
+
+<Steps>
+  <Step title="Implement GeoBlockEntity on your block entity class">
+    Add `implements GeoBlockEntity` and create an `AnimatableInstanceCache` field using `GeckoLibUtil.createInstanceCache(this)`.
+
+    ```java MyBlockEntity.java
+    import com.geckolib.animatable.GeoBlockEntity;
+    import com.geckolib.animatable.instance.AnimatableInstanceCache;
+    import com.geckolib.animatable.manager.AnimatableManager;
+    import com.geckolib.animation.AnimationController;
+    import com.geckolib.animation.RawAnimation;
+    import com.geckolib.util.GeckoLibUtil;
+    import net.minecraft.core.BlockPos;
+    import net.minecraft.world.level.block.entity.BlockEntity;
+    import net.minecraft.world.level.block.entity.BlockEntityType;
+    import net.minecraft.world.level.block.state.BlockState;
+
+    public class MyBlockEntity extends BlockEntity implements GeoBlockEntity {
+
+        private static final RawAnimation OPEN_ANIM =
+            RawAnimation.begin().thenPlay("animation.myblock.open");
+        private static final RawAnimation IDLE_ANIM =
+            RawAnimation.begin().thenLoop("animation.myblock.idle");
+
+        private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+
+        public MyBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState blockState) {
+            super(type, pos, blockState);
+        }
+
+        @Override
+        public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+            controllers.add(
+                new AnimationController<>(this, "controller", 0, state ->
+                    state.setAndContinue(IDLE_ANIM)
+                )
+                .triggerableAnim("open", OPEN_ANIM)
+            );
+        }
+
+        @Override
+        public AnimatableInstanceCache getAnimatableInstanceCache() {
+            return this.cache;
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Create a GeoBlockRenderer">
+    Create a renderer extending `GeoBlockRenderer<MyBlockEntity, BlockEntityRenderState>` and register it in your client-side setup.
+
+    ```java MyBlockEntityRenderer.java
+    import com.geckolib.renderer.GeoBlockRenderer;
+    import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
+    import net.minecraft.client.renderer.blockentity.BlockEntityRenderState;
+
+    public class MyBlockEntityRenderer extends GeoBlockRenderer<MyBlockEntity, BlockEntityRenderState> {
+
+        public MyBlockEntityRenderer(BlockEntityRendererProvider.Context context) {
+            super(context, new MyBlockEntityModel());
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Triggering animations
+
+Like `GeoEntity`, `GeoBlockEntity` provides `triggerAnim` and `stopTriggeredAnim` for event-driven animations. Register triggerable animations on the controller with `.triggerableAnim(name, rawAnimation)` before calling `triggerAnim`.
+
+### `triggerAnim`
+
+```java
+default void triggerAnim(@Nullable String controllerName, String animName)
+```
+
+Plays the named triggerable animation on the block entity. Pass the controller name for a direct lookup, or `null` to search all controllers.
+
+### `stopTriggeredAnim`
+
+```java
+default void stopTriggeredAnim(@Nullable String controllerName, @Nullable String animName)
+```
+
+Stops a previously triggered animation. Pass `null` for `animName` to stop any active triggered animation on the given controller.
+
+### Example: triggering on block interaction
+
+```java MyBlockEntity.java
+// Called when a player interacts with the block — runs on the server
+public InteractionResult onUse(Player player) {
+    this.triggerAnim("controller", "open");
+    return InteractionResult.SUCCESS;
+}
+```
+
+<Tabs>
+  <Tab title="Server side (recommended)">
+    When called on the server, GeckoLib sends a network packet to all clients tracking the block entity's chunk, keeping the animation synchronized.
+
+    ```java MyBlockEntity.java
+    // Server-side trigger — synced to all nearby clients automatically
+    this.triggerAnim("controller", "open");
+    ```
+  </Tab>
+  <Tab title="Client side">
+    When called on the client, the trigger applies locally only. Use this for client-predicted cosmetic effects.
+
+    ```java MyBlockEntity.java
+    if (this.level != null && this.level.isClientSide()) {
+        this.triggerAnim("controller", "open");
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+Both `triggerAnim` and `stopTriggeredAnim` require the block entity to already be placed in a level. If `getLevel()` returns `null` at the time of the call, GeckoLib will log an error and silently skip the trigger. Never call these methods during construction or before the block entity has been added to the world.
+</Warning>
+
+## Cache details
+
+`GeckoLibUtil.createInstanceCache(this)` detects that `this` is a `BlockEntity` and returns an `InstancedAnimatableInstanceCache`. Internally, all managers for a block entity are stored under the key `0` because a block entity represents a single, fixed position and does not need numeric differentiation between instances.

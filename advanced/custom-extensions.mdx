@@ -1,0 +1,168 @@
+---
+title: "Custom EasingTypes, LoopTypes & Resource Loaders"
+description: "Extend GeckoLib by registering custom easing curves, post-animation loop behaviours, and alternate resource loaders during mod construction."
+---
+
+GeckoLib exposes three runtime extension points that let you plug in custom behaviour without forking the library. All three must be registered during mod construction — GeckoLib reads them when it first processes animation files, so registrations that arrive later will be silently ignored.
+
+<Warning>
+All custom extensions **must be registered during mod construction** (i.e. in your mod initializer, before any game content is loaded). Registering them in a game event, a tick handler, or lazily will have no effect.
+</Warning>
+
+## 1. Custom EasingType
+
+An `EasingType` is a functional interface that maps a `Double` easing argument (from the animation JSON) to a `Double2DoubleFunction` — a curve that converts a normalised progress value `t ∈ [0, 1]` into an interpolated value.
+
+GeckoLib ships with over 30 built-in easing types (`linear`, `easeinsine`, `easeinquad`, `catmullrom`, etc.). You can add your own with one of two helpers on `GeckoLibUtil`.
+
+### Simple easing (no argument)
+
+Use `addCustomSimpleEasingType` when your curve does not require an external parameter from the animation JSON:
+
+```java title="MyMod.java (mod initializer)"
+GeckoLibUtil.addCustomSimpleEasingType(
+    "mymod:smooth_step",          // name used in Blockbench / animation JSON
+    t -> t * t * (3 - 2 * t)     // Double2DoubleFunction — smooth-step curve
+);
+```
+
+### Parameterised easing (with argument)
+
+Use `addCustomEasingType` when you need to read the easing argument that Blockbench writes into the keyframe:
+
+```java title="MyMod.java (mod initializer)"
+GeckoLibUtil.addCustomEasingType(
+    "mymod:power",
+    (EasingType) easingArg -> {
+        // easingArg is the value from the animation JSON, or null if not provided
+        double exponent = easingArg != null ? easingArg : 2.0;
+        return t -> Math.pow(t, exponent);
+    }
+);
+```
+
+The `EasingType` functional interface contract:
+
+```java
+@FunctionalInterface
+public interface EasingType {
+    // Given the easing argument from the keyframe JSON (may be null),
+    // return the interpolation function to apply to the progress value t.
+    Double2DoubleFunction buildTransformer(@Nullable Double easingArg);
+}
+```
+
+Once registered, reference your easing by name in Blockbench's keyframe easing dropdown or directly in the animation JSON:
+
+```json title="animations/my_entity.animation.json (snippet)"
+"pre": { "x": 0 },
+"post": { "x": 90 },
+"easing": "mymod:power",
+"easingArgs": [3]
+```
+
+## 2. Custom LoopType
+
+A `LoopType` determines what happens when an animation finishes playing. The built-in types are `play_once`, `loop`, and `hold_on_last_frame`. You can register additional types to implement custom post-animation behaviour.
+
+`LoopType` is a functional interface that receives the current animatable, animation point, timeline stage, render state, and controller, and returns a `boolean` indicating whether the animation should keep playing.
+
+```java title="MyMod.java (mod initializer)"
+GeckoLibUtil.addCustomLoopType(
+    "mymod:reverse_loop",
+    (animatable, animationPoint, timelineStage, renderState, controller) -> {
+        // Rewind to the end of the timeline stage and play backwards next frame.
+        // For illustration only — a real reverse would need additional state.
+        controller.setTimelineTime(timelineStage.endTime());
+        return true;
+    }
+);
+```
+
+The `LoopType` functional interface contract:
+
+```java
+@FunctionalInterface
+public interface LoopType {
+    /**
+     * Called when the current animation reaches its end.
+     *
+     * Make any timeline adjustments (via controller.setTimelineTime) before returning.
+     *
+     * @return true  to keep the animation running (loop / hold behaviour)
+     *         false to stop the animation
+     */
+    boolean shouldKeepPlaying(
+        GeoAnimatable animatable,
+        AnimationPoint animationPoint,
+        AnimationTimeline.Stage timelineStage,
+        GeoRenderState renderState,
+        AnimationController<? extends GeoAnimatable> controller
+    );
+}
+```
+
+Reference your loop type in Blockbench by setting the animation's **Loop** field to your registered name, or in the animation JSON:
+
+```json title="animations/my_entity.animation.json (snippet)"
+"animation.my_entity.special": {
+    "loop": "mymod:reverse_loop",
+    ...
+}
+```
+
+## 3. Custom resource loader
+
+GeckoLib reads model and animation files using a built-in Gson pipeline. `addResourceLoader` lets you swap in an alternate deserialization scheme for specific files — for example, to support a different JSON schema or a binary format.
+
+You provide two objects:
+
+- A `GeckoLibLoader.Predicate` that returns `true` for the files your loader should handle.
+- A `GeckoLibLoader<T>` implementation that handles deserialization and baking.
+
+```java title="MyMod.java (mod initializer)"
+GeckoLibUtil.addResourceLoader(
+    // Predicate — handle only files inside "mymod/geo/"
+    (id, resource) -> id.getNamespace().equals("mymod") && id.getPath().startsWith("geo/"),
+
+    // Loader implementation
+    new GeckoLibLoader<JsonObject>() {
+        @Override
+        public String[] supportedExtensions() {
+            return new String[]{ "json" };
+        }
+
+        @Override
+        public JsonObject deserializeGeckoLibModelFile(Identifier id, Resource resource) {
+            // Read the resource and return a raw object of type T
+            try (var reader = new InputStreamReader(resource.open())) {
+                return GsonBuilder().create().fromJson(reader, JsonObject.class);
+            }
+        }
+
+        @Override
+        public JsonObject deserializeGeckoLibAnimationFile(Identifier id, Resource resource) {
+            try (var reader = new InputStreamReader(resource.open())) {
+                return new GsonBuilder().create().fromJson(reader, JsonObject.class);
+            }
+        }
+
+        @Override
+        public BakedGeoModel bakeGeckoLibModelFile(Identifier id, JsonObject raw) {
+            // Convert raw T into a BakedGeoModel using GeckoLib's baking utilities
+            return GeoModelLoader.INSTANCE.bake(id, raw);
+        }
+
+        @Override
+        public BakedAnimations bakeGeckoLibAnimationsFile(
+            Identifier id, JsonObject raw, MathParser mathParser
+        ) {
+            return AnimationLoader.INSTANCE.bake(id, raw, mathParser);
+        }
+    }
+);
+```
+
+<Note>
+Custom resource loaders are only needed for advanced scenarios like supporting alternate file formats. Most mods will never need this API.
+</Note>

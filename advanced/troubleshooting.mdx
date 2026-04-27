@@ -1,0 +1,192 @@
+---
+title: "GeckoLib Troubleshooting & Common Issues"
+description: "Fix the most common GeckoLib problems: missing models, animations not playing, sync issues, BlockEntity crashes, item registration, and easing not applied."
+---
+
+This page covers the most frequent problems encountered when working with GeckoLib. Each entry describes the symptom, the likely cause, and how to fix it.
+
+<Note>
+If your issue is not listed here, join the [GeckoLib Discord](https://discord.gg/pPEqBgJtZW) for community support from the developers and other modders.
+</Note>
+
+<AccordionGroup>
+  <Accordion title="Model or texture not found (ResourceLocation error)">
+    **Symptom:** A `RuntimeException` or `FileNotFoundException` at startup or when the entity first renders, mentioning a missing model or texture path.
+
+    **Cause:** GeckoLib uses strict naming conventions for resource paths. The most common mistakes are:
+
+    - Model files not placed under `assets/<modid>/geo/`
+    - Animation files not placed under `assets/<modid>/animations/`
+    - Texture files not placed under `assets/<modid>/textures/`
+    - A typo in the path string returned by `getModelResource`, `getTextureResource`, or `getAnimationResource`
+    - Using `.json` instead of `.geo.json` for model files (the file must end in `.geo.json`)
+
+    **Fix:** Double-check that your file names and directory layout match the paths returned by your renderer overrides. GeckoLib appends `.geo.json` and `.animation.json` automatically in some helpers — verify you are not double-appending the extension.
+
+    ```java title="MyEntityModel.java"
+    @Override
+    public Identifier getModelResource(GeoRenderState renderState) {
+        // Correct: assets/mymod/geo/my_entity.geo.json
+        return Identifier.fromNamespaceAndPath("mymod", "geo/my_entity.geo.json");
+    }
+
+    @Override
+    public Identifier getTextureResource(GeoRenderState renderState) {
+        // Correct: assets/mymod/textures/entity/my_entity.png
+        return Identifier.fromNamespaceAndPath("mymod", "textures/entity/my_entity.png");
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Animation not playing (entity stays in T-pose or idle)">
+    **Symptom:** The entity renders correctly but never moves, or only the idle animation plays.
+
+    **Cause:** One of the following:
+
+    1. The `AnimationController` state handler is returning `PlayState.STOP` unconditionally.
+    2. The animation name passed to `RawAnimation` does not exactly match the name in the animation JSON (including the `animation.` prefix).
+    3. The animation file is not being loaded — check the console for resource errors on startup.
+
+    **Fix:** Verify the controller logic and animation name. Animation names in GeckoLib must match exactly as written in the JSON file.
+
+    ```java title="MyEntity.java"
+    private static final RawAnimation WALK_ANIM =
+        RawAnimation.begin().thenLoop("animation.my_entity.walk");
+
+    @Override
+    public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+        controllers.add(new AnimationController<>(this, "main", 5, state -> {
+            if (state.isMoving())
+                return state.setAndContinue(WALK_ANIM);
+
+            // Returning STOP here is valid for idle — make sure you have an idle anim
+            // or accept that the entity holds its last pose
+            return PlayState.STOP;
+        }));
+    }
+    ```
+
+    <Tip>
+    Enable GeckoLib debug logging to see which animations are being requested and why they might be stopping. Check for `WARN` lines from the `GeckoLib` logger at startup.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Triggered animation not syncing to clients">
+    **Symptom:** `triggerAnim` is called on the server but the animation never plays on the client, or only plays on the server-side entity.
+
+    **Cause:** Two common mistakes:
+
+    1. `triggerAnim` is being called **on the client side** only (inside a client event or render method). Triggered animations must originate from the **server** to be synced.
+    2. `GeoItem.registerSyncedAnimatable` (for items) or the equivalent `registerSyncedAnimatable` call was not made for the animatable class, so GeckoLib does not know to sync it.
+
+    **Fix:** Call `triggerAnim` from server-side logic (a goal, a use method, a game event). For entities, GeckoLib handles the sync automatically once triggered server-side. For items, ensure registration is done in the item constructor:
+
+    ```java title="MyAnimatedEntity.java"
+    // Correct — called in a server-side method
+    @Override
+    public InteractionResult mobInteract(Player player, InteractionHand hand) {
+        if (!level().isClientSide()) {
+            triggerAnim("main", "animation.my_entity.interact");
+        }
+        return InteractionResult.SUCCESS;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="BlockEntity animation crashes on placement or load">
+    **Symptom:** A `NullPointerException` or `IllegalStateException` when a block entity is placed or loaded from disk, typically inside an animation controller or `triggerAnim`.
+
+    **Cause:** The animation system tries to access world state (level, position, neighbors) before the block entity has been fully added to the world. This happens when `triggerAnim` or controller setup code runs inside the `BlockEntity` constructor or `load(CompoundTag)`.
+
+    **Fix:** Defer any animation calls until after the block entity is in the world. Use `setLevel` or a tick-based guard:
+
+    ```java title="MyAnimatedBlockEntity.java"
+    private boolean initialized = false;
+
+    @Override
+    public void setLevel(Level level) {
+        super.setLevel(level);
+        // Safe to interact with the world here
+        initialized = true;
+    }
+
+    public void startAnimation() {
+        if (!initialized || level == null) return;
+        triggerAnim("main", "animation.my_block.open");
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Item animation not playing">
+    **Symptom:** A `GeoItem` renders correctly but animations never play, or the `AnimatableInstanceCache` throws an exception about an unregistered animatable.
+
+    **Cause:** `GeoItem.registerSyncedAnimatable(this)` was not called in the item constructor. GeckoLib uses a static registry to track which item instances are animatable and to assign unique stack IDs. Without this call, the cache cannot find the animatable.
+
+    **Fix:** Call `registerSyncedAnimatable` in the item constructor:
+
+    ```java title="MyAnimatedItem.java"
+    public class MyAnimatedItem extends Item implements GeoItem {
+
+        private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+
+        public MyAnimatedItem(Properties properties) {
+            super(properties);
+            // Required — must be in the constructor
+            GeoItem.registerSyncedAnimatable(this);
+        }
+
+        @Override
+        public AnimatableInstanceCache getAnimatableInstanceCache() {
+            return cache;
+        }
+
+        @Override
+        public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+            controllers.add(new AnimationController<>(this, "main", 0, state ->
+                    state.setAndContinue(IDLE_ANIM)));
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Concurrent animations interfering with each other">
+    **Symptom:** Two animations play at the same time but bones visually snap or jitter, or one animation partially overrides another unexpectedly.
+
+    **Cause:** Multiple `AnimationController` instances are writing to the same bones simultaneously. GeckoLib applies each controller's bone transforms on top of each other in registration order — if two controllers both rotate the same bone, the result is additive and likely unintended.
+
+    **Fix:** Partition your animations so that each controller owns exclusive bones, or use a single controller with a priority state machine. You can also use `setBoneExclusionList` or equivalent bone masking if supported by your version of GeckoLib.
+
+    ```java title="MyEntity.java"
+    @Override
+    public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+        // Body controller — owns torso, legs
+        controllers.add(new AnimationController<>(this, "body", 5, state -> { ... }));
+
+        // Head controller — owns head bone only
+        // Ensure the animation file for head_anim only includes the "head" bone
+        controllers.add(new AnimationController<>(this, "head", 2, state -> { ... }));
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Easing not applied (animation interpolates linearly)">
+    **Symptom:** Easing is configured in Blockbench for a keyframe transition, but the in-game animation always interpolates linearly.
+
+    **Cause:** The `AnimationController` has an easing override set that forces linear interpolation regardless of what is in the JSON. This is controlled by `setOverrideEasingType` on the controller — if it is set to `EasingType.LINEAR` (or the equivalent `none` variant), it overrides all per-keyframe easing.
+
+    **Fix:** Either remove the controller-level easing override, or leave it unset so that per-keyframe easing from the animation JSON is respected:
+
+    ```java title="MyEntity.java"
+    controllers.add(
+        new AnimationController<>(this, "main", 5, state -> { ... })
+            // Remove or comment out any setOverrideEasingType call to use
+            // per-keyframe easing from Blockbench
+            // .setOverrideEasingType(EasingType.LINEAR) // <-- this disables keyframe easing
+    );
+    ```
+
+    <Tip>
+    Check your Blockbench export settings too — some versions of the Bedrock Exporter plugin do not export easing data unless "Include Easing" is explicitly enabled.
+    </Tip>
+  </Accordion>
+</AccordionGroup>

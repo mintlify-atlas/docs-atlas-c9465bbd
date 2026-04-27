@@ -1,0 +1,156 @@
+---
+title: "GeoModel: Resolving Assets for GeckoLib Renderers"
+description: "GeoModel links your Blockbench JSON assets to GeckoLib renderers. Learn to implement the three abstract methods and use Defaulted helpers to reduce boilerplate."
+keywords: ['geckolib', 'geomodel', 'animation', 'model', 'defaulted', 'resource path']
+---
+
+Every animated object in GeckoLib needs a `GeoModel` subclass that tells the renderer where to find its three asset files: the geometry JSON, the texture, and the animation JSON. Think of `GeoModel` as a resolver — it receives context about what is currently being rendered (via a `GeoRenderState`) and returns the resource identifiers your assets are located at. You can have a single model class shared across many animatables, or a dedicated one per object; the choice depends on how much dynamic resolution you need.
+
+## Abstract methods
+
+All `GeoModel` subclasses must implement three methods. Each receives the render context so you can vary assets at runtime (for example, a texture based on health, or a model based on a variant).
+
+```java GeoModel.java (signatures)
+// Returns the identifier for the .geo.json model file
+public abstract Identifier getModelResource(GeoRenderState renderState);
+
+// Returns the identifier for the texture .png file
+public abstract Identifier getTextureResource(GeoRenderState renderState);
+
+// Returns the identifier for the .animation.json file
+public abstract Identifier getAnimationResource(T animatable);
+```
+
+| Method | Argument | Purpose |
+|---|---|---|
+| `getModelResource` | `GeoRenderState` | Picks the geometry file for this render pass |
+| `getTextureResource` | `GeoRenderState` | Picks the texture file for this render pass |
+| `getAnimationResource` | `T animatable` | Picks the animation file; receives the animatable directly because animations are resolved before render state is built |
+
+### Animation fallbacks
+
+If your animatable can fall back to a secondary animation file (for example, a shared base animation library), override `getAnimationResourceFallbacks`:
+
+```java MyModel.java
+@Override
+public Identifier[] getAnimationResourceFallbacks(T animatable) {
+    return new Identifier[] { new Identifier("mymod", "animations/shared_base.animation.json") };
+}
+```
+
+GeckoLib searches the primary resource first, then each fallback in order. Use fallbacks sparingly — they are intended for shared animation libraries, not as a general-purpose override mechanism.
+
+---
+
+## Raw GeoModel example
+
+Use a raw `GeoModel` subclass when you need fully dynamic asset resolution, such as swapping textures based on entity data.
+
+```java CoolEntityModel.java
+public class CoolEntityModel extends GeoModel<CoolEntity> {
+
+    private static final Identifier MODEL =
+        Identifier.of("mymod", "geo/entity/cool_entity.geo.json");
+    private static final Identifier TEXTURE_NORMAL =
+        Identifier.of("mymod", "textures/entity/cool_entity.png");
+    private static final Identifier TEXTURE_ANGRY =
+        Identifier.of("mymod", "textures/entity/cool_entity_angry.png");
+    private static final Identifier ANIMATIONS =
+        Identifier.of("mymod", "animations/cool_entity.animation.json");
+
+    @Override
+    public Identifier getModelResource(GeoRenderState renderState) {
+        return MODEL;
+    }
+
+    @Override
+    public Identifier getTextureResource(GeoRenderState renderState) {
+        // Swap texture based on a custom data ticket written by the renderer
+        boolean isAngry = renderState.getOrDefaultGeckolibData(DataTickets.IS_ANGRY, false);
+        return isAngry ? TEXTURE_ANGRY : TEXTURE_NORMAL;
+    }
+
+    @Override
+    public Identifier getAnimationResource(CoolEntity animatable) {
+        return ANIMATIONS;
+    }
+}
+```
+
+---
+
+## Defaulted helpers
+
+For most objects the asset paths follow a predictable structure. GeckoLib ships three `DefaultedGeoModel` subclasses that derive all three paths automatically from a single `Identifier` you pass to the constructor.
+
+### Naming convention
+
+Given an `assetSubpath` of `new Identifier("mymod", "animals/red_fish")`, each subclass resolves paths as follows:
+
+| Class | Model path | Texture path | Animation path |
+|---|---|---|---|
+| `DefaultedEntityGeoModel` | `mymod:geo/entity/animals/red_fish.geo.json` | `mymod:textures/entity/animals/red_fish.png` | `mymod:animations/entity/animals/red_fish.animation.json` |
+| `DefaultedItemGeoModel` | `mymod:geo/item/animals/red_fish.geo.json` | `mymod:textures/item/animals/red_fish.png` | `mymod:animations/item/animals/red_fish.animation.json` |
+| `DefaultedBlockGeoModel` | `mymod:geo/block/animals/red_fish.geo.json` | `mymod:textures/block/animals/red_fish.png` | `mymod:animations/block/animals/red_fish.animation.json` |
+
+The subtype (`entity`, `item`, `block`) is inserted as a subdirectory prefix automatically by the `subtype()` method on each class.
+
+### Convenience constructors
+
+Each defaulted class also provides a constructor that accepts the registered game object directly, deriving the namespace and path from its registry ID:
+
+```java
+// Derives asset path from the EntityType's registry key, e.g. mymod:cool_entity
+new DefaultedEntityGeoModel<>(MyEntities.COOL_ENTITY)
+
+// Derives asset path from the Item's registry key
+new DefaultedItemGeoModel<>(MyItems.COOL_SWORD)
+
+// Derives asset path from the BlockEntityType's registry key
+new DefaultedBlockGeoModel<>(MyBlockEntities.COOL_FURNACE)
+```
+
+### Overriding individual paths
+
+If an animatable shares a model with another object but needs its own texture or animations, use the fluent `withAlt*` methods:
+
+```java
+new DefaultedEntityGeoModel<>(MyEntities.COOL_ENTITY)
+    .withAltTexture(Identifier.of("mymod", "variant/special_skin"))
+    .withAltAnimations(Identifier.of("mymod", "entity/alternate_walk"));
+```
+
+### DefaultedEntityGeoModel example
+
+```java CoolEntityRenderer.java
+public class CoolEntityRenderer extends GeoEntityRenderer<CoolEntity, EntityRenderState> {
+
+    public CoolEntityRenderer(EntityRendererProvider.Context context) {
+        super(context, new DefaultedEntityGeoModel<>(MyEntities.COOL_ENTITY));
+    }
+}
+```
+
+<Tip>
+Use the Defaulted helpers (`DefaultedEntityGeoModel`, `DefaultedItemGeoModel`, `DefaultedBlockGeoModel`) for any object that doesn't need dynamic asset resolution. They enforce a consistent folder layout, reduce boilerplate to a single constructor call, and make it easy to share assets between animatables using the `withAlt*` methods.
+</Tip>
+
+---
+
+## Passing custom data with `addAdditionalStateData`
+
+Sometimes your model's `getModelResource` or `getTextureResource` implementations depend on data that isn't captured by the renderer by default — for example, a custom NBT flag or a config value. Override `addAdditionalStateData` to write that data into the `GeoRenderState` before the resource methods are called.
+
+```java
+@Override
+public void addAdditionalStateData(
+        CoolEntity animatable,
+        @Nullable Object relatedObject,
+        GeoRenderState renderState) {
+
+    // Write your custom data ticket so getTextureResource can read it
+    renderState.addGeckolibData(MyCoolDataTickets.VARIANT, animatable.getVariant());
+}
+```
+
+`addAdditionalStateData` is called once per render frame, before `getModelResource` and `getTextureResource` are invoked, so any tickets you write here are available inside those methods.

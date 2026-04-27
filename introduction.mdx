@@ -1,0 +1,48 @@
+---
+title: "GeckoLib: 3D Animation Engine for Minecraft Mods"
+description: "GeckoLib brings keyframe-driven 3D animations, 30+ easings, concurrent controllers, and MoLang math expressions to Forge, Fabric, and NeoForge mods."
+keywords: ["geckolib", "minecraft animation", "geo model", "blockbench", "entity animation", "mod animation"]
+---
+
+GeckoLib is an animation and rendering engine for Minecraft mods. It bridges Blockbench — the standard 3D modeling tool for Minecraft — and the game itself, allowing you to attach complex, keyframe-driven 3D animations to entities, block entities, items, and armor across Forge, Fabric, and NeoForge.
+
+## What problem does GeckoLib solve?
+
+Vanilla Minecraft's animation system is limited to a handful of hardcoded entity animations. Adding anything beyond walking, swimming, or attacking requires significant engine work. GeckoLib replaces that pipeline with a data-driven approach: you design your model and animations visually in Blockbench, export two JSON files, and wire them up to a handful of Java classes. The library handles interpolation, easing, bone transforms, and render-state management for you.
+
+## Key features
+
+- **30+ easing types** — Sine, cubic, elastic, bounce, catmull-rom, and custom easing functions control how keyframes interpolate.
+- **Concurrent animation controllers** — Each `AnimationController` plays one animation at a time. Register multiple controllers to layer independent animation tracks (for example, a walking cycle alongside a separate head-look controller).
+- **Sound, particle, and custom event keyframes** — Trigger sounds, spawn particles, or fire arbitrary Java callbacks at precise points in an animation, directly from the Blockbench timeline.
+- **MoLang math expressions** — Drive bone transforms procedurally using Bedrock-compatible MoLang queries (`query.modified_move_speed`, `query.anim_time`, etc.).
+- **Server-triggered animations** — Call `triggerAnim()` from server-side code; GeckoLib sends the trigger over the network automatically.
+- **Forge, Fabric, and NeoForge support** — A single API across all three loaders; only the Gradle dependency changes between platforms.
+
+## How GeckoLib fits into your mod
+
+The workflow is intentionally linear:
+
+1. **Blockbench** — Model your entity and animate its bones. Export a `.geo.json` model file and a `.animation.json` animation file into your mod's `resources/` directory.
+2. **`GeoModel`** — Extend `GeoModel` (or its convenience subclass `DefaultedEntityGeoModel`) to tell GeckoLib where your JSON files live. The model resolves resource paths for the geometry, texture, and animations.
+3. **`GeoAnimatable`** — Implement `GeoEntity` (or the appropriate sub-interface) on your entity class. Override `registerControllers` to create `AnimationController` instances and define which `RawAnimation` plays under which conditions. Store an `AnimatableInstanceCache` to hold per-instance animation state.
+4. **Renderer** — Create a `GeoEntityRenderer` subclass and register it with the vanilla entity renderer registry. GeckoLib renders your model using the state collected from steps 2 and 3.
+
+<Note>
+  GeckoLib uses [Blockbench](https://www.blockbench.net/) as its authoring tool. Export your model as **GeckoLib Entity** format to produce the `.geo.json` geometry file, and export animations as **GeckoLib Animation** format to produce the `.animation.json` file.
+</Note>
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Add GeckoLib to your Gradle project and configure it for Forge, Fabric, or NeoForge.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Animate your first custom entity in five steps, from Blockbench export to in-game result.
+  </Card>
+</CardGroup>
+
+## Community and support
+
+Join the [GeckoLib Discord](https://discord.gg/pPEqBgJtZW) for help, community showcases, and announcements. The Discord is the fastest way to get answers from the maintainers and other mod developers using GeckoLib.

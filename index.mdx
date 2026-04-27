@@ -1,133 +1,64 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "GeckoLib: Animation Engine for Minecraft Mods"
+description: "GeckoLib brings complex 3D keyframe animations to Minecraft mods. Supports Forge, Fabric, and NeoForge with 30+ easings and concurrent controllers."
 ---
 
-## Setting up
+GeckoLib is an animation and rendering engine for Minecraft mods. It lets you attach Blockbench-authored 3D animations to entities, block entities, items, and armor — with support for concurrent animation controllers, sound and particle keyframe events, server-triggered animations, and procedural math expressions via MoLang.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Add GeckoLib to your Forge, Fabric, or NeoForge mod project via Gradle.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Animate your first entity in five steps — from model to in-game result.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Animatables" icon="person-running" href="/animatables/overview">
+    Learn which interface to implement for entities, blocks, items, and more.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Animation System" icon="film" href="/animation/controllers">
+    Understand AnimationControllers, RawAnimation chains, and loop types.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What GeckoLib provides
 
-Everything you need to create world-class documentation.
+<CardGroup cols={2}>
+  <Card title="30+ Easing Types" icon="wave-sine" href="/animation/easing-types">
+    Sine, cubic, elastic, bounce, catmull-rom, and custom easing functions for smooth keyframe transitions.
+  </Card>
+  <Card title="Keyframe Events" icon="bell" href="/animation/keyframe-events">
+    Trigger sounds, spawn particles, and fire custom callbacks directly from animation keyframes.
+  </Card>
+  <Card title="Models & Renderers" icon="cube" href="/rendering/renderers">
+    Drop-in renderers for entities, block entities, items, armor, and replaced entities.
+  </Card>
+  <Card title="Render Layers" icon="layer-group" href="/rendering/render-layers">
+    Built-in layers for glowing textures, held items, worn armor, and custom texture overlays.
+  </Card>
+  <Card title="MoLang Math" icon="function" href="/advanced/molang-math">
+    Drive animations procedurally using Bedrock-compatible MoLang math expressions.
+  </Card>
+  <Card title="Advanced Patterns" icon="gear" href="/advanced/stateless-animatables">
+    Stateless animatables, custom easing types, custom loop types, and resource loaders.
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## Supported modloaders
 
-## Make your content agent ready
+GeckoLib 5 ships separate artifacts for every major Minecraft modloader. The core API is identical across all three — only the Gradle dependency changes.
 
-Make your docs work for humans and AI agents alike.
+<CardGroup cols={3}>
+  <Card title="Forge" icon="fire" href="/installation">
+    `geckolib-forge-<version>`
+  </Card>
+  <Card title="Fabric" icon="th" href="/installation">
+    `geckolib-fabric-<version>`
+  </Card>
+  <Card title="NeoForge" icon="bolt" href="/installation">
+    `geckolib-neoforge-<version>`
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Note>
+  GeckoLib uses [Blockbench](https://www.blockbench.net/) as its authoring tool. Create your model and animations in Blockbench, export the `.geo.json` and `.animation.json` files, and reference them from your GeoModel class.
+</Note>

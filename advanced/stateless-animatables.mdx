@@ -1,0 +1,115 @@
+---
+title: "Stateless Animatables: Event-Driven Animation"
+description: "Use StatelessAnimatable to play animations imperatively from server or client code, without writing an AnimationController state machine."
+---
+
+The standard GeckoLib animation system is state-driven: you register `AnimationController` instances that return a `PlayState` on every render frame, and the controller decides which animation to play based on the current state of the animatable. This works well for looping idle, walk, and fly cycles, but can feel verbose when you just want to fire a one-off animation in response to an event — like a special attack or a door opening.
+
+`StatelessAnimatable` is an alternative interface for exactly that use-case. Instead of writing a state machine, you call `playAnimation(...)` directly on your entity or block entity, and GeckoLib handles syncing the animation to all clients that are tracking the object.
+
+<Note>
+Stateless animatables are described as less efficient than the standard approach in the source code. For animatables that are always animated (walking mobs, idle blocks), prefer the regular `AnimationController`. Use stateless only when the animation is event-driven and you have no persistent state to track.
+</Note>
+
+## The StatelessAnimatable interface
+
+`StatelessAnimatable` is a sealed interface with four permitted implementations:
+
+| Type | Use for |
+|---|---|
+| `StatelessGeoEntity` | Entities |
+| `StatelessGeoBlockEntity` | Block entities |
+| `StatelessGeoSingletonAnimatable` | Singleton animatables (items, etc.) |
+| `StatelessGeoObject` | Arbitrary `GeoObject` animatables |
+
+Each type provides default implementations of `playAnimation` and `stopAnimation` that handle server-to-client packet dispatch automatically.
+
+### Core methods
+
+```java
+// Play once (uses the loop type baked into the animation JSON)
+entity.playAnimation("animation.my_entity.attack");
+
+// Force loop
+entity.playLoopingAnimation("animation.my_entity.spin");
+
+// Play then hold the final frame
+entity.playAndHoldAnimation("animation.my_entity.open");
+
+// Stop a running animation
+entity.stopAnimation("animation.my_entity.spin");
+```
+
+All of these can be called from **either server or client side**. On the server, they automatically send packets to all players tracking the entity. On the client, they update the local animation state directly.
+
+## How it differs from GeoEntity
+
+A regular `GeoEntity` requires you to override `registerControllers` and return at least one `AnimationController` that evaluates state on every frame:
+
+```java title="MyRegularEntity.java"
+@Override
+public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+    controllers.add(new AnimationController<>(this, "main", 5, state -> {
+        if (state.isMoving())
+            return state.setAndContinue(WALK_ANIM);
+
+        return state.setAndContinue(IDLE_ANIM);
+    }));
+}
+```
+
+A `StatelessGeoEntity` skips that entirely. You still implement `GeoEntity`, but the `StatelessAnimatable` mixin takes care of controller creation internally — one `StatelessAnimationController` per active animation, keyed by animation name.
+
+```java title="MyStatelessEntity.java"
+// Each StatelessAnimationController holds a single RawAnimation reference.
+// When currentAnim is null the controller returns PlayState.STOP.
+public class StatelessAnimationController extends AnimationController<GeoAnimatable> {
+    protected @Nullable RawAnimation currentAnim = null;
+    // ...
+}
+```
+
+## Complete example — StatelessGeoEntity
+
+```java title="MyEventEntity.java"
+public class MyEventEntity extends Monster implements StatelessGeoEntity {
+
+    private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+
+    public MyEventEntity(EntityType<? extends Monster> type, Level level) {
+        super(type, level);
+    }
+
+    // Called from, e.g., a custom goal or ability
+    public void performAttack() {
+        // Works on both server and client; synced automatically
+        playAnimation("animation.my_event_entity.attack");
+    }
+
+    // --- GeoAnimatable boilerplate ---
+
+    @Override
+    public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+        // StatelessAnimatable manages its own controllers internally.
+        // You can still add regular controllers here for persistent animations
+        // like idle or walk — just be careful they don't fight over the same bones.
+        controllers.add(new AnimationController<>(this, "idle", 5, state ->
+                state.setAndContinue(IDLE_ANIM)));
+    }
+
+    @Override
+    public AnimatableInstanceCache getAnimatableInstanceCache() {
+        return cache;
+    }
+}
+```
+
+<Tip>
+If you mix stateless and regular controllers, make sure they target different bones. Two controllers that both write to the same bone will fight each other every frame.
+</Tip>
+
+## StatelessGeoEntity network behaviour
+
+When `playAnimation` is called **on the server**, `StatelessGeoEntity` dispatches a `StatelessEntityPlayAnimPacket` to all players that are currently tracking the entity. When called **on the client**, it updates the local `AnimatableManager` directly. The same logic applies to `stopAnimation`.
+
+This means you can safely call `playAnimation` from server-side game logic (goals, event handlers, commands) and trust that all nearby clients will see the animation without any additional networking code.

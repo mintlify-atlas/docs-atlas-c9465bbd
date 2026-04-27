@@ -1,0 +1,149 @@
+---
+title: "Animating Minecraft Entities with GeoEntity"
+description: "Step-by-step guide to implementing GeoEntity on your Minecraft entity class, registering animation controllers, and triggering animations from server or client."
+---
+
+`GeoEntity` is the `GeoAnimatable` sub-interface for Minecraft entities, including mobs, projectiles, and any other class that extends `net.minecraft.world.entity.Entity`. Implementing it gives you per-instance animation state, automatic network syncing for triggered animations, and renderer integration through GeckoLib's entity renderer pipeline.
+
+<Warning>
+`GeoEntity` **cannot** be used when you want GeckoLib to render an existing vanilla or third-party entity without changing its class. Use [`GeoReplacedEntity`](/animatables/replaced-entities) instead.
+</Warning>
+
+## Implementation
+
+<Steps>
+  <Step title="Implement GeoEntity on your entity class">
+    Add `implements GeoEntity` to your entity class and declare a static cache field.
+
+    ```java MyEntity.java
+    import com.geckolib.animatable.GeoEntity;
+    import com.geckolib.animatable.instance.AnimatableInstanceCache;
+    import com.geckolib.animatable.manager.AnimatableManager;
+    import com.geckolib.animation.AnimationController;
+    import com.geckolib.animation.RawAnimation;
+    import com.geckolib.animation.object.PlayState;
+    import com.geckolib.util.GeckoLibUtil;
+
+    public class MyEntity extends Monster implements GeoEntity {
+
+        private static final RawAnimation IDLE_ANIM =
+            RawAnimation.begin().thenLoop("animation.myentity.idle");
+        private static final RawAnimation ATTACK_ANIM =
+            RawAnimation.begin().thenPlay("animation.myentity.attack");
+
+        private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+
+        public MyEntity(EntityType<? extends Monster> type, Level level) {
+            super(type, level);
+        }
+
+        @Override
+        public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
+            controllers.add(
+                new AnimationController<>(this, "controller", 5, state -> {
+                    if (state.isMoving()) {
+                        return state.setAndContinue(WALK_ANIM);
+                    }
+                    return state.setAndContinue(IDLE_ANIM);
+                })
+                .triggerableAnim("attack", ATTACK_ANIM)
+            );
+        }
+
+        @Override
+        public AnimatableInstanceCache getAnimatableInstanceCache() {
+            return this.cache;
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Create a GeoEntityRenderer">
+    Create a renderer class that extends `GeoEntityRenderer<MyEntity>` and points to your model and texture. Register it in your client-side setup.
+
+    ```java MyEntityRenderer.java
+    import com.geckolib.renderer.GeoEntityRenderer;
+    import net.minecraft.client.renderer.entity.EntityRendererProvider;
+
+    public class MyEntityRenderer extends GeoEntityRenderer<MyEntity> {
+
+        public MyEntityRenderer(EntityRendererProvider.Context context) {
+            super(context, new MyEntityModel());
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Triggering animations
+
+`GeoEntity` provides `triggerAnim` and `stopTriggeredAnim` for event-driven animations that play on demand rather than being driven by the state handler every frame.
+
+Before an animation can be triggered, it must be registered on the controller with `triggerableAnim`:
+
+```java
+new AnimationController<>(this, "controller", 5, state -> { ... })
+    .triggerableAnim("attack", ATTACK_ANIM)
+```
+
+### `triggerAnim`
+
+```java
+default void triggerAnim(@Nullable String controllerName, String animName)
+```
+
+Plays the named triggerable animation. Pass the controller name for a direct (efficient) lookup, or `null` to search all controllers.
+
+### `stopTriggeredAnim`
+
+```java
+default void stopTriggeredAnim(@Nullable String controllerName, @Nullable String animName)
+```
+
+Stops a previously triggered animation. Pass `null` for `animName` to stop any currently playing triggered animation on the specified controller.
+
+### Calling from server vs client
+
+Both methods check which side they are called from and act accordingly.
+
+<Tabs>
+  <Tab title="Server side (recommended)">
+    Calling from the server sends a network packet to all tracking clients, keeping animation state in sync across all players.
+
+    ```java MyEntity.java
+    // Inside your entity — e.g. in performAttack() or a goal
+    @Override
+    public void performAttack() {
+        // Called on the server; GeckoLib networks this to clients automatically
+        this.triggerAnim("controller", "attack");
+    }
+    ```
+  </Tab>
+  <Tab title="Client side">
+    Calling from the client applies the trigger only locally. Use this for purely cosmetic, client-predicted effects where server sync is not required.
+
+    ```java MyEntity.java
+    // Only call this path on the client
+    if (this.level().isClientSide()) {
+        this.triggerAnim("controller", "attack");
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+Prefer calling `triggerAnim` from the server. GeckoLib automatically syncs the trigger to all clients watching the entity, so you get consistent animation playback without writing any networking code yourself.
+</Tip>
+
+### Stopping a triggered animation
+
+```java MyEntity.java
+// Stop a specific triggered animation on a named controller
+this.stopTriggeredAnim("controller", "attack");
+
+// Stop any triggered animation on a named controller
+this.stopTriggeredAnim("controller", null);
+
+// Lazy search across all controllers (less efficient)
+this.stopTriggeredAnim(null, "attack");
+```

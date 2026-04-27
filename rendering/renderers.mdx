@@ -1,0 +1,320 @@
+---
+title: "GeckoLib Renderers: Entities, Blocks, Items, Armor"
+description: "Covers GeoEntityRenderer, GeoBlockRenderer, GeoItemRenderer, and GeoArmorRenderer — with constructors and Forge/NeoForge/Fabric registration steps."
+keywords: ['geckolib', 'renderer', 'entity renderer', 'block renderer', 'item renderer', 'armor renderer', 'registration']
+---
+
+GeckoLib provides a dedicated renderer class for each Minecraft object type it supports. Each renderer implements the `GeoRenderer` interface and handles the full pipeline: compiling render state, animating bones, dispatching render passes, and forwarding to attached render layers. You create a renderer instance, assign it a `GeoModel`, and register it with Minecraft's rendering system — GeckoLib takes care of the rest.
+
+<Note>
+All renderer classes and their registration calls must be placed in **client-side code only**. Referencing them on the server side will cause a crash. Use your mod loader's designated client entrypoint or `@OnlyIn(Dist.CLIENT)` / `@Environment(EnvType.CLIENT)` annotations as appropriate.
+</Note>
+
+---
+
+## GeoEntityRenderer
+
+`GeoEntityRenderer<T, R>` is the base renderer for any `Entity` subclass, including projectiles and living entities.
+
+**Type parameters**
+- `T` — your entity class, must implement `GeoAnimatable`
+- `R` — the render state class, typically `EntityRenderState` or `LivingEntityRenderState`
+
+**Constructors**
+
+```java GeoEntityRenderer.java
+// Convenience: derives assets from the EntityType's registry key
+public GeoEntityRenderer(EntityRendererProvider.Context context, EntityType<? extends T> entityType)
+
+// Full control: supply your own GeoModel
+public GeoEntityRenderer(EntityRendererProvider.Context context, GeoModel<T> model)
+```
+
+**Minimal implementation**
+
+```java CoolEntityRenderer.java
+public class CoolEntityRenderer extends GeoEntityRenderer<CoolEntity, EntityRenderState> {
+
+    public CoolEntityRenderer(EntityRendererProvider.Context context) {
+        super(context, MyEntities.COOL_ENTITY);
+        // Optionally chain layer or scale configuration
+        // .withRenderLayer(renderer -> new AutoGlowingGeoLayer<>(renderer))
+        // .withScale(1.2f)
+    }
+}
+```
+
+**Registration**
+
+<Tabs>
+  <Tab title="Forge / NeoForge">
+    ```java ClientSetup.java
+    @Mod.EventBusSubscriber(modid = MyMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
+    public class ClientSetup {
+
+        @SubscribeEvent
+        public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
+            event.registerEntityRenderer(MyEntities.COOL_ENTITY, CoolEntityRenderer::new);
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Fabric">
+    ```java MyModClient.java
+    public class MyModClient implements ClientModInitializer {
+
+        @Override
+        public void onInitializeClient() {
+            EntityRendererRegistry.register(MyEntities.COOL_ENTITY, CoolEntityRenderer::new);
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GeoBlockRenderer
+
+`GeoBlockRenderer<T, R>` handles `BlockEntity` subclasses that implement `GeoAnimatable`.
+
+**Type parameters**
+- `T` — your block entity class, must implement `GeoAnimatable`
+- `R` — the render state class, typically `BlockEntityRenderState`
+
+**Constructors**
+
+```java GeoBlockRenderer.java
+// Convenience: derives assets from the BlockEntityType's registry key
+public GeoBlockRenderer(BlockEntityRendererProvider.Context context, BlockEntityType<? extends T> blockEntityType)
+
+// Full control: supply your own GeoModel
+public GeoBlockRenderer(BlockEntityRendererProvider.Context context, GeoModel<T> model)
+```
+
+**Minimal implementation**
+
+```java CoolFurnaceRenderer.java
+public class CoolFurnaceRenderer extends GeoBlockRenderer<CoolFurnaceBlockEntity, BlockEntityRenderState> {
+
+    public CoolFurnaceRenderer(BlockEntityRendererProvider.Context context) {
+        super(context, MyBlockEntities.COOL_FURNACE);
+    }
+}
+```
+
+**Registration**
+
+<Tabs>
+  <Tab title="Forge / NeoForge">
+    ```java ClientSetup.java
+    @SubscribeEvent
+    public static void onRegisterBlockEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        event.registerBlockEntityRenderer(MyBlockEntities.COOL_FURNACE, CoolFurnaceRenderer::new);
+    }
+    ```
+  </Tab>
+  <Tab title="Fabric">
+    ```java MyModClient.java
+    BlockEntityRendererFactories.register(MyBlockEntities.COOL_FURNACE, CoolFurnaceRenderer::new);
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## GeoItemRenderer
+
+`GeoItemRenderer<T>` renders animated `Item` subclasses. Items are stateless on the server, so GeckoLib passes a `RenderData` record that bundles the `ItemStack`, display context, and owning entity into the render state.
+
+**Type parameter**
+- `T` — your item class, must implement `GeoAnimatable`
+
+**Constructors**
+
+```java GeoItemRenderer.java
+// Convenience: derives assets from the Item's registry key
+public GeoItemRenderer(I item)
+
+// Full control: supply your own GeoModel
+public GeoItemRenderer(GeoModel<T> model)
+```
+
+**Minimal implementation**
+
+```java CoolSwordRenderer.java
+public class CoolSwordRenderer extends GeoItemRenderer<CoolSwordItem> {
+
+    public CoolSwordRenderer() {
+        super(MyItems.COOL_SWORD);
+        // .useAlternateGuiLighting() — enable entity-style lighting in GUI slots
+    }
+}
+```
+
+**Registration**
+
+Item renderers are provided through `GeoRenderProvider`, which is implemented on your item class rather than registered globally. Override `createGeoRenderer` to supply the renderer lazily.
+
+```java CoolSwordItem.java
+public class CoolSwordItem extends SwordItem implements GeoItem {
+
+    // Lazily created — never instantiated on the server
+    private GeoItemRenderer<CoolSwordItem> renderer;
+
+    @Override
+    public void createGeoRenderer(Consumer<GeoRenderProvider> consumer) {
+        consumer.accept(new GeoRenderProvider() {
+            @Override
+            public GeoItemRenderer<?> getGeoItemRenderer() {
+                if (renderer == null)
+                    renderer = new CoolSwordRenderer();
+                return renderer;
+            }
+        });
+    }
+}
+```
+
+---
+
+## GeoArmorRenderer
+
+`GeoArmorRenderer<T, R>` renders animated armor items on humanoid entities. It integrates with vanilla's `HumanoidArmorLayer` via a mixin and maps GeckoLib bones (`armorHead`, `armorBody`, `armorLeftArm`, etc.) to the corresponding vanilla `ModelPart` transforms.
+
+**Type parameters**
+- `T` — your armor item class, must implement `GeoItem`
+- `R` — the render state, must extend `HumanoidRenderState`
+
+**Constructors**
+
+```java GeoArmorRenderer.java
+// Convenience: derives assets using the "armor" subtype and the item's registry key
+public GeoArmorRenderer(I armorItem)
+
+// Full control: supply your own GeoModel
+public GeoArmorRenderer(GeoModel<T> model)
+```
+
+**Default bone names**
+
+| Slot | Expected bone |
+|---|---|
+| Head | `armorHead` |
+| Chest | `armorBody` |
+| Left arm | `armorLeftArm` |
+| Right arm | `armorRightArm` |
+| Left leg | `armorLeftLeg` |
+| Right leg | `armorRightLeg` |
+| Left foot | `armorLeftBoot` |
+| Right foot | `armorRightBoot` |
+
+Override `getBoneNameForSegment` if your model uses different names.
+
+**Minimal implementation**
+
+```java ObsidianArmorRenderer.java
+public class ObsidianArmorRenderer extends GeoArmorRenderer<ObsidianArmorItem, HumanoidRenderState> {
+
+    public ObsidianArmorRenderer() {
+        super(MyItems.OBSIDIAN_HELMET); // any piece from the set works
+    }
+}
+```
+
+**Registration**
+
+Like items, armor renderers are provided through `GeoRenderProvider`. Override `createGeoRenderer` to supply the renderer lazily.
+
+```java ObsidianArmorItem.java
+public class ObsidianArmorItem extends ArmorItem implements GeoItem {
+
+    private GeoArmorRenderer<ObsidianArmorItem, HumanoidRenderState> renderer;
+
+    @Override
+    public void createGeoRenderer(Consumer<GeoRenderProvider> consumer) {
+        consumer.accept(new GeoRenderProvider() {
+            @Override
+            public GeoArmorRenderer<?, ?> getGeoArmorRenderer(ItemStack stack, EquipmentSlot slot) {
+                if (renderer == null)
+                    renderer = new ObsidianArmorRenderer();
+                return renderer;
+            }
+        });
+    }
+}
+```
+
+---
+
+## DyeableGeoArmorRenderer
+
+`DyeableGeoArmorRenderer<T, R>` extends `GeoArmorRenderer` to support per-bone dye tinting without modifying the geometry JSON format. Implement `isBoneDyeable(GeoBone)` to mark which bones should receive a dye tint, and optionally override `getColorForBone` to customize the color per bone.
+
+```java DyeableObsidianArmorRenderer.java
+public class DyeableObsidianArmorRenderer
+        extends DyeableGeoArmorRenderer<ObsidianArmorItem, HumanoidRenderState> {
+
+    public DyeableObsidianArmorRenderer(GeoModel<ObsidianArmorItem> model) {
+        super(model);
+    }
+
+    @Override
+    protected boolean isBoneDyeable(GeoBone bone) {
+        // Mark bones whose names start with "dye_" as dyeable
+        return bone.getName().startsWith("dye_");
+    }
+
+    @Override
+    protected int getColorForBone(HumanoidRenderState renderState, GeoBone bone, int baseColour) {
+        // Return a custom per-bone color, or delegate to the item's dye component
+        return baseColour;
+    }
+}
+```
+
+<Note>
+The `dyeableBones` set is cached per `BakedGeoModel`. If `isBoneDyeable` needs to return different results at runtime, call `this.dyeableBones.clear()` and `this.lastModel = null` to force a re-evaluation on the next frame.
+</Note>
+
+---
+
+## Scale and additional configuration
+
+All renderers expose a fluent `withScale` method for uniform or independent width/height scaling:
+
+```java
+new CoolEntityRenderer(context).withScale(1.5f);          // uniform
+new CoolEntityRenderer(context).withScale(1.2f, 0.8f);    // width, height
+```
+
+Render layers are attached via `withRenderLayer` — see [Render Layers](/rendering/render-layers) for details.
+
+---
+
+## GeoObjectRenderer
+
+`GeoObjectRenderer<T, O, R>` is a generic renderer for any GeckoLib animatable that does not fall neatly into the entity/block/item categories — for example, custom HUD elements or standalone rendering contexts. It implements `GeoRenderer` directly and exposes the same `withRenderLayer` and `withScale` fluent API as the other renderers. Use it as a base when writing specialty renderers that GeckoLib does not provide a dedicated class for.
+
+```java
+GeoObjectRenderer<MyObject, Void, GeoRenderState> renderer =
+    new GeoObjectRenderer<>(new MyObjectModel());
+```
+
+---
+
+## GeoRenderEvent
+
+`GeoRenderEvent` is a multiloader-friendly interface that GeckoLib fires at key stages of the render pipeline: before and after the model is compiled, and when render layers are collected. On Forge and NeoForge these map to bus events; on Fabric they use Fabric's callback system.
+
+Use the `CompileRenderLayers` sub-event to add render layers to any GeckoLib renderer from outside its class — useful when integrating with renderers you do not own:
+
+```java
+// NeoForge / Forge example
+@SubscribeEvent
+public static void onCompileRenderLayers(GeoRenderEvent.CompileRenderLayers.Entity event) {
+    if (event.getRenderer() instanceof CoolEntityRenderer renderer) {
+        event.addLayer(new MyExtraLayer<>(renderer));
+    }
+}
+```
